@@ -1,0 +1,710 @@
+"use server";
+
+import { db } from "@/db";
+import {
+  players,
+  opponentClubs,
+  courses,
+  fixtures,
+  matches,
+} from "@/db/schema";
+import { eq, desc, asc, and, or, sql } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+
+type ActionResult<T = undefined> = T extends undefined
+  ? { success: boolean; error?: string }
+  : { success: boolean; error?: string; data?: T };
+
+// ---------------------------------------------------------------------------
+// Players
+// ---------------------------------------------------------------------------
+
+export async function createPlayer(data: {
+  name: string;
+  email?: string;
+  phone?: string;
+  defaultHandicap?: number;
+}) {
+  try {
+    const result = db
+      .insert(players)
+      .values({
+        name: data.name,
+        email: data.email ?? null,
+        phone: data.phone ?? null,
+        defaultHandicap: data.defaultHandicap ?? 18,
+      })
+      .returning()
+      .get();
+    revalidatePath("/players");
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function updatePlayer(
+  id: number,
+  data: {
+    name?: string;
+    email?: string | null;
+    phone?: string | null;
+    defaultHandicap?: number;
+    active?: boolean;
+  },
+) {
+  try {
+    const result = db
+      .update(players)
+      .set(data)
+      .where(eq(players.id, id))
+      .returning()
+      .get();
+    revalidatePath("/players");
+    revalidatePath(`/players/${id}`);
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function togglePlayerActive(id: number) {
+  try {
+    const player = db
+      .select()
+      .from(players)
+      .where(eq(players.id, id))
+      .get();
+    if (!player) return { success: false, error: "Player not found" };
+
+    const result = db
+      .update(players)
+      .set({ active: !player.active })
+      .where(eq(players.id, id))
+      .returning()
+      .get();
+    revalidatePath("/players");
+    revalidatePath(`/players/${id}`);
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getPlayers(activeOnly = false) {
+  try {
+    const query = activeOnly
+      ? db
+          .select()
+          .from(players)
+          .where(eq(players.active, true))
+          .orderBy(asc(players.name))
+          .all()
+      : db.select().from(players).orderBy(asc(players.name)).all();
+    return { success: true, data: query };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as (typeof players.$inferSelect)[] };
+  }
+}
+
+export async function getPlayer(id: number) {
+  try {
+    const result = db
+      .select()
+      .from(players)
+      .where(eq(players.id, id))
+      .get();
+    if (!result) return { success: false, error: "Player not found" };
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Opponent Clubs
+// ---------------------------------------------------------------------------
+
+export async function createClub(data: { name: string }) {
+  try {
+    const result = db
+      .insert(opponentClubs)
+      .values({ name: data.name })
+      .returning()
+      .get();
+    revalidatePath("/clubs");
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function updateClub(id: number, data: { name: string }) {
+  try {
+    const result = db
+      .update(opponentClubs)
+      .set({ name: data.name })
+      .where(eq(opponentClubs.id, id))
+      .returning()
+      .get();
+    revalidatePath("/clubs");
+    revalidatePath(`/clubs/${id}`);
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function deleteClub(id: number) {
+  try {
+    const fixtureUsingClub = db
+      .select({ id: fixtures.id })
+      .from(fixtures)
+      .where(eq(fixtures.opponentClubId, id))
+      .get();
+    if (fixtureUsingClub) {
+      return {
+        success: false,
+        error: "Cannot delete club that is referenced by a fixture",
+      };
+    }
+    db.delete(opponentClubs).where(eq(opponentClubs.id, id)).run();
+    revalidatePath("/clubs");
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getClubs() {
+  try {
+    const result = db
+      .select()
+      .from(opponentClubs)
+      .orderBy(asc(opponentClubs.name))
+      .all();
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as (typeof opponentClubs.$inferSelect)[] };
+  }
+}
+
+export async function getClub(id: number) {
+  try {
+    const result = db
+      .select()
+      .from(opponentClubs)
+      .where(eq(opponentClubs.id, id))
+      .get();
+    if (!result) return { success: false, error: "Club not found" };
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Courses
+// ---------------------------------------------------------------------------
+
+export async function createCourse(data: {
+  name: string;
+  par?: number;
+  slopeRating?: number;
+  courseRating?: number;
+}) {
+  try {
+    const result = db
+      .insert(courses)
+      .values({
+        name: data.name,
+        par: data.par ?? null,
+        slopeRating: data.slopeRating ?? null,
+        courseRating: data.courseRating ?? null,
+      })
+      .returning()
+      .get();
+    revalidatePath("/courses");
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function updateCourse(
+  id: number,
+  data: {
+    name?: string;
+    par?: number | null;
+    slopeRating?: number | null;
+    courseRating?: number | null;
+  },
+) {
+  try {
+    const result = db
+      .update(courses)
+      .set(data)
+      .where(eq(courses.id, id))
+      .returning()
+      .get();
+    revalidatePath("/courses");
+    revalidatePath(`/courses/${id}`);
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function deleteCourse(id: number) {
+  try {
+    const fixtureUsingCourse = db
+      .select({ id: fixtures.id })
+      .from(fixtures)
+      .where(eq(fixtures.courseId, id))
+      .get();
+    if (fixtureUsingCourse) {
+      return {
+        success: false,
+        error: "Cannot delete course that is referenced by a fixture",
+      };
+    }
+    db.delete(courses).where(eq(courses.id, id)).run();
+    revalidatePath("/courses");
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getCourses() {
+  try {
+    const result = db
+      .select()
+      .from(courses)
+      .orderBy(asc(courses.name))
+      .all();
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as (typeof courses.$inferSelect)[] };
+  }
+}
+
+export async function getCourse(id: number) {
+  try {
+    const result = db
+      .select()
+      .from(courses)
+      .where(eq(courses.id, id))
+      .get();
+    if (!result) return { success: false, error: "Course not found" };
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+export async function createFixture(data: {
+  date: string;
+  opponentClubId: number;
+  courseId: number;
+  homeAway?: "home" | "away" | "neutral";
+  notes?: string;
+}) {
+  try {
+    const result = db
+      .insert(fixtures)
+      .values({
+        date: data.date,
+        opponentClubId: data.opponentClubId,
+        courseId: data.courseId,
+        homeAway: data.homeAway ?? "home",
+        notes: data.notes ?? null,
+      })
+      .returning()
+      .get();
+    revalidatePath("/fixtures");
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function updateFixture(
+  id: number,
+  data: {
+    date?: string;
+    opponentClubId?: number;
+    courseId?: number;
+    homeAway?: "home" | "away" | "neutral";
+    notes?: string | null;
+  },
+) {
+  try {
+    const result = db
+      .update(fixtures)
+      .set(data)
+      .where(eq(fixtures.id, id))
+      .returning()
+      .get();
+    revalidatePath("/fixtures");
+    revalidatePath(`/fixtures/${id}`);
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function deleteFixture(id: number) {
+  try {
+    // Matches cascade-delete via FK, so just delete the fixture
+    db.delete(fixtures).where(eq(fixtures.id, id)).run();
+    revalidatePath("/fixtures");
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getFixtures() {
+  try {
+    const result = db
+      .select()
+      .from(fixtures)
+      .orderBy(desc(fixtures.date))
+      .all();
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as (typeof fixtures.$inferSelect)[] };
+  }
+}
+
+export async function getFixture(id: number) {
+  try {
+    const result = db
+      .select()
+      .from(fixtures)
+      .where(eq(fixtures.id, id))
+      .get();
+    if (!result) return { success: false, error: "Fixture not found" };
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getFixtureWithDetails(id: number) {
+  try {
+    const result = db
+      .select({
+        id: fixtures.id,
+        date: fixtures.date,
+        opponentClubId: fixtures.opponentClubId,
+        courseId: fixtures.courseId,
+        homeAway: fixtures.homeAway,
+        notes: fixtures.notes,
+        createdAt: fixtures.createdAt,
+        opponentClubName: opponentClubs.name,
+        courseName: courses.name,
+        coursePar: courses.par,
+        courseSlopeRating: courses.slopeRating,
+        courseRating: courses.courseRating,
+      })
+      .from(fixtures)
+      .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
+      .innerJoin(courses, eq(fixtures.courseId, courses.id))
+      .where(eq(fixtures.id, id))
+      .get();
+    if (!result) return { success: false, error: "Fixture not found" };
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getFixturesWithDetails() {
+  try {
+    const result = db
+      .select({
+        id: fixtures.id,
+        date: fixtures.date,
+        opponentClubId: fixtures.opponentClubId,
+        courseId: fixtures.courseId,
+        homeAway: fixtures.homeAway,
+        notes: fixtures.notes,
+        createdAt: fixtures.createdAt,
+        opponentClubName: opponentClubs.name,
+        courseName: courses.name,
+      })
+      .from(fixtures)
+      .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
+      .innerJoin(courses, eq(fixtures.courseId, courses.id))
+      .orderBy(desc(fixtures.date))
+      .all();
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as Array<{
+      id: number;
+      date: string;
+      opponentClubId: number;
+      courseId: number;
+      homeAway: string;
+      notes: string | null;
+      createdAt: string;
+      opponentClubName: string;
+      courseName: string;
+    }> };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Matches
+// ---------------------------------------------------------------------------
+
+export async function createMatch(data: {
+  fixtureId: number;
+  player1Id: number;
+  player2Id: number;
+  player1Handicap: number;
+  player2Handicap: number;
+  opponent1Name: string;
+  opponent2Name: string;
+  opponent1Handicap: number;
+  opponent2Handicap: number;
+  result: "win" | "loss" | "halved";
+  margin?: string;
+  matchOrder?: number;
+  notes?: string;
+}) {
+  try {
+    const result = db
+      .insert(matches)
+      .values({
+        fixtureId: data.fixtureId,
+        player1Id: data.player1Id,
+        player2Id: data.player2Id,
+        player1Handicap: data.player1Handicap,
+        player2Handicap: data.player2Handicap,
+        opponent1Name: data.opponent1Name,
+        opponent2Name: data.opponent2Name,
+        opponent1Handicap: data.opponent1Handicap,
+        opponent2Handicap: data.opponent2Handicap,
+        result: data.result,
+        margin: data.margin ?? null,
+        matchOrder: data.matchOrder ?? null,
+        notes: data.notes ?? null,
+      })
+      .returning()
+      .get();
+    revalidatePath(`/fixtures/${data.fixtureId}`);
+    revalidatePath("/fixtures");
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function updateMatch(
+  id: number,
+  data: {
+    player1Id?: number;
+    player2Id?: number;
+    player1Handicap?: number;
+    player2Handicap?: number;
+    opponent1Name?: string;
+    opponent2Name?: string;
+    opponent1Handicap?: number;
+    opponent2Handicap?: number;
+    result?: "win" | "loss" | "halved";
+    margin?: string | null;
+    matchOrder?: number | null;
+    notes?: string | null;
+  },
+) {
+  try {
+    const result = db
+      .update(matches)
+      .set(data)
+      .where(eq(matches.id, id))
+      .returning()
+      .get();
+    if (result) {
+      revalidatePath(`/fixtures/${result.fixtureId}`);
+    }
+    revalidatePath("/fixtures");
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function deleteMatch(id: number) {
+  try {
+    const match = db
+      .select({ fixtureId: matches.fixtureId })
+      .from(matches)
+      .where(eq(matches.id, id))
+      .get();
+    db.delete(matches).where(eq(matches.id, id)).run();
+    if (match) {
+      revalidatePath(`/fixtures/${match.fixtureId}`);
+    }
+    revalidatePath("/fixtures");
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getMatchesByFixture(fixtureId: number) {
+  try {
+    const p1 = db
+      .select({
+        id: players.id,
+        name: players.name,
+      })
+      .from(players)
+      .as("p1");
+
+    const p2 = db
+      .select({
+        id: players.id,
+        name: players.name,
+      })
+      .from(players)
+      .as("p2");
+
+    const result = db
+      .select({
+        id: matches.id,
+        fixtureId: matches.fixtureId,
+        player1Id: matches.player1Id,
+        player2Id: matches.player2Id,
+        player1Handicap: matches.player1Handicap,
+        player2Handicap: matches.player2Handicap,
+        opponent1Name: matches.opponent1Name,
+        opponent2Name: matches.opponent2Name,
+        opponent1Handicap: matches.opponent1Handicap,
+        opponent2Handicap: matches.opponent2Handicap,
+        result: matches.result,
+        margin: matches.margin,
+        matchOrder: matches.matchOrder,
+        notes: matches.notes,
+        player1Name: p1.name,
+        player2Name: p2.name,
+      })
+      .from(matches)
+      .innerJoin(p1, eq(matches.player1Id, p1.id))
+      .innerJoin(p2, eq(matches.player2Id, p2.id))
+      .where(eq(matches.fixtureId, fixtureId))
+      .orderBy(asc(matches.matchOrder))
+      .all();
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as Array<Record<string, unknown>> };
+  }
+}
+
+export async function getMatchesByPlayer(playerId: number) {
+  try {
+    const result = db
+      .select({
+        id: matches.id,
+        fixtureId: matches.fixtureId,
+        player1Id: matches.player1Id,
+        player2Id: matches.player2Id,
+        player1Handicap: matches.player1Handicap,
+        player2Handicap: matches.player2Handicap,
+        opponent1Name: matches.opponent1Name,
+        opponent2Name: matches.opponent2Name,
+        opponent1Handicap: matches.opponent1Handicap,
+        opponent2Handicap: matches.opponent2Handicap,
+        result: matches.result,
+        margin: matches.margin,
+        matchOrder: matches.matchOrder,
+        notes: matches.notes,
+        fixtureDate: fixtures.date,
+        opponentClubName: opponentClubs.name,
+        courseName: courses.name,
+      })
+      .from(matches)
+      .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
+      .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
+      .innerJoin(courses, eq(fixtures.courseId, courses.id))
+      .where(
+        or(
+          eq(matches.player1Id, playerId),
+          eq(matches.player2Id, playerId),
+        ),
+      )
+      .orderBy(desc(fixtures.date))
+      .all();
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as Array<Record<string, unknown>> };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Analytics – all matches with full context
+// ---------------------------------------------------------------------------
+
+export async function getAllMatches() {
+  try {
+    const p1 = db
+      .select({
+        id: players.id,
+        name: players.name,
+      })
+      .from(players)
+      .as("p1");
+
+    const p2 = db
+      .select({
+        id: players.id,
+        name: players.name,
+      })
+      .from(players)
+      .as("p2");
+
+    const result = db
+      .select({
+        id: matches.id,
+        fixtureId: matches.fixtureId,
+        player1Id: matches.player1Id,
+        player2Id: matches.player2Id,
+        player1Handicap: matches.player1Handicap,
+        player2Handicap: matches.player2Handicap,
+        opponent1Name: matches.opponent1Name,
+        opponent2Name: matches.opponent2Name,
+        opponent1Handicap: matches.opponent1Handicap,
+        opponent2Handicap: matches.opponent2Handicap,
+        result: matches.result,
+        margin: matches.margin,
+        matchOrder: matches.matchOrder,
+        notes: matches.notes,
+        player1Name: p1.name,
+        player2Name: p2.name,
+        fixtureDate: fixtures.date,
+        homeAway: fixtures.homeAway,
+        opponentClubId: fixtures.opponentClubId,
+        opponentClubName: opponentClubs.name,
+        courseId: fixtures.courseId,
+        courseName: courses.name,
+      })
+      .from(matches)
+      .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
+      .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
+      .innerJoin(courses, eq(fixtures.courseId, courses.id))
+      .innerJoin(p1, eq(matches.player1Id, p1.id))
+      .innerJoin(p2, eq(matches.player2Id, p2.id))
+      .orderBy(desc(fixtures.date), asc(matches.matchOrder))
+      .all();
+    return { success: true, data: result };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] as Array<Record<string, unknown>> };
+  }
+}
