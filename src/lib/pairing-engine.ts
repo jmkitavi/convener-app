@@ -85,7 +85,7 @@ function scoreHandicapCompatibility(h1: number, h2: number): number {
 }
 
 /**
- * Venue affinity: how well does this pair perform at the given course?
+ * Venue affinity: how well does this pair perform at the given venue?
  * Falls back to the combined individual venue records if the pair has no venue data.
  */
 function scoreVenueAffinity(
@@ -93,12 +93,12 @@ function scoreVenueAffinity(
   allMatches: MatchWithDetails[],
   player1Id: number,
   player2Id: number,
-  courseId: number | undefined,
+  venueName: string | undefined,
 ): { score: number; venueWins: number; venuePlayed: number } {
-  if (!courseId) return { score: 0.5, venueWins: 0, venuePlayed: 0 };
+  if (!venueName) return { score: 0.5, venueWins: 0, venuePlayed: 0 };
 
   // First try: pair's record at this venue
-  const pairVenueMatches = pairMatches.filter((m) => m.courseId === courseId);
+  const pairVenueMatches = pairMatches.filter((m) => m.venueName === venueName);
   if (pairVenueMatches.length >= 2) {
     const wins = pairVenueMatches.filter((m) => m.result === "win").length;
     return {
@@ -111,7 +111,7 @@ function scoreVenueAffinity(
   // Fallback: individual venue records combined
   const playerVenueMatches = allMatches.filter(
     (m) =>
-      m.courseId === courseId &&
+      m.venueName === venueName &&
       (m.player1Id === player1Id ||
         m.player2Id === player1Id ||
         m.player1Id === player2Id ||
@@ -172,7 +172,7 @@ function generateReasoning(
   venueData: { venueWins: number; venuePlayed: number },
   formData: { p1FormWinRate: number; p2FormWinRate: number },
   handicapScore: number,
-  courseName: string | undefined,
+  venueName: string | undefined,
   player1Name: string,
   player2Name: string,
 ): string[] {
@@ -194,13 +194,13 @@ function generateReasoning(
     }
   }
 
-  if (venueData.venuePlayed >= 2 && courseName) {
+  if (venueData.venuePlayed >= 2 && venueName) {
     const venueRecord = formatRecord(
       venueData.venueWins,
       venueData.venuePlayed - venueData.venueWins,
       0,
     );
-    reasons.push(`Strong at ${courseName} (${venueRecord})`);
+    reasons.push(`Strong at ${venueName} (${venueRecord})`);
   }
 
   if (formData.p1FormWinRate >= 0.6 && formData.p2FormWinRate >= 0.6) {
@@ -223,7 +223,7 @@ function generateReasoning(
 export function suggestPairings(
   availablePlayers: AvailablePlayer[],
   historicalMatches: MatchWithDetails[],
-  courseId?: number,
+  venueName?: string,
   topN: number = 20,
 ): PairingSuggestion[] {
   if (availablePlayers.length < 2) return [];
@@ -244,19 +244,14 @@ export function suggestPairings(
     pairingStatsMap.set(key, ps);
   }
 
-  const venueStatsMap = new Map<number, { wins: number; played: number }>();
-  if (courseId) {
+  const venueStatsMap = new Map<string, { wins: number; played: number }>();
+  if (venueName) {
     for (const vs of getVenueStats(historicalMatches)) {
-      if (vs.courseId === courseId) {
-        venueStatsMap.set(courseId, { wins: vs.wins, played: vs.played });
+      if (vs.venueName === venueName) {
+        venueStatsMap.set(venueName, { wins: vs.wins, played: vs.played });
       }
     }
   }
-
-  // Look up course name if we have a courseId
-  const courseName = courseId
-    ? historicalMatches.find((m) => m.courseId === courseId)?.courseName
-    : undefined;
 
   const suggestions: PairingSuggestion[] = [];
 
@@ -295,7 +290,7 @@ export function suggestPairings(
         historicalMatches,
         p1.id,
         p2.id,
-        courseId,
+        venueName,
       );
       const formResult = scoreRecentForm(historicalMatches, p1.id, p2.id);
 
@@ -319,7 +314,7 @@ export function suggestPairings(
         venueResult,
         formResult,
         handicapScore,
-        courseName,
+        venueName,
         p1.name,
         p2.name,
       );

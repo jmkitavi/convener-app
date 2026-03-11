@@ -92,7 +92,7 @@ export default async function PlayerDetailPage({
   const matchHistory = [...playerMatchesSorted].reverse().map((m) => ({
     id: m.id,
     fixtureDate: m.fixtureDate,
-    courseName: m.courseName,
+    venueName: m.venueName,
     opponentClubName: m.opponentClubName,
     partnerId: m.player1Id === player.id ? m.player2Id : m.player1Id,
     partnerName:

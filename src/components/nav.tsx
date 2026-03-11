@@ -8,7 +8,6 @@ import {
   Users,
   Calendar,
   Building2,
-  MapPin,
   BarChart3,
   Menu,
   X,
@@ -21,7 +20,6 @@ const navLinks = [
   { href: "/players", label: "Players", icon: Users },
   { href: "/fixtures", label: "Fixtures", icon: Calendar },
   { href: "/clubs", label: "Clubs", icon: Building2 },
-  { href: "/courses", label: "Courses", icon: MapPin },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
 

@@ -1,21 +1,11 @@
-CREATE TABLE `courses` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`name` text NOT NULL,
-	`par` integer,
-	`slope_rating` real,
-	`course_rating` real
-);
---> statement-breakpoint
 CREATE TABLE `fixtures` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`date` text NOT NULL,
 	`opponent_club_id` integer NOT NULL,
-	`course_id` integer NOT NULL,
 	`home_away` text DEFAULT 'home' NOT NULL,
 	`notes` text,
 	`created_at` text NOT NULL,
-	FOREIGN KEY (`opponent_club_id`) REFERENCES `opponent_clubs`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`course_id`) REFERENCES `courses`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`opponent_club_id`) REFERENCES `opponent_clubs`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE TABLE `matches` (
@@ -40,7 +30,10 @@ CREATE TABLE `matches` (
 --> statement-breakpoint
 CREATE TABLE `opponent_clubs` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`name` text NOT NULL
+	`name` text NOT NULL,
+	`par` integer,
+	`slope_rating` real,
+	`course_rating` real
 );
 --> statement-breakpoint
 CREATE TABLE `players` (

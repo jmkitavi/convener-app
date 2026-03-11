@@ -71,7 +71,7 @@ type HandicapPoint = {
 type MatchHistoryEntry = {
   id: number;
   fixtureDate: string;
-  courseName: string;
+  venueName: string;
   opponentClubName: string;
   partnerId: number;
   partnerName: string;
@@ -390,7 +390,7 @@ export function PlayerDetailClient({
                       <TableRow>
                         <TableHead>Date</TableHead>
                         <TableHead>Opponent Club</TableHead>
-                        <TableHead>Course</TableHead>
+                        <TableHead>Venue</TableHead>
                         <TableHead>Partner</TableHead>
                         <TableHead>Result</TableHead>
                         <TableHead>Margin</TableHead>
@@ -402,7 +402,7 @@ export function PlayerDetailClient({
                         <TableRow key={m.id}>
                           <TableCell>{formatDate(m.fixtureDate)}</TableCell>
                           <TableCell>{m.opponentClubName}</TableCell>
-                          <TableCell>{m.courseName}</TableCell>
+                          <TableCell>{m.venueName}</TableCell>
                           <TableCell>
                             <Link
                               href={`/players/${m.partnerId}`}
@@ -507,7 +507,7 @@ export function PlayerDetailClient({
                   Venue Performance
                 </CardTitle>
                 <CardDescription>
-                  Record at each course
+                  Record at each venue
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -515,7 +515,7 @@ export function PlayerDetailClient({
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Course</TableHead>
+                        <TableHead>Venue</TableHead>
                         <TableHead className="text-center">Played</TableHead>
                         <TableHead className="text-center">W</TableHead>
                         <TableHead className="text-center">L</TableHead>
@@ -525,9 +525,9 @@ export function PlayerDetailClient({
                     </TableHeader>
                     <TableBody>
                       {venueStats.map((v) => (
-                        <TableRow key={v.courseId}>
+                        <TableRow key={v.venueName}>
                           <TableCell className="font-medium">
-                            {v.courseName}
+                            {v.venueName}
                           </TableCell>
                           <TableCell className="text-center">
                             {v.played}
@@ -586,7 +586,7 @@ export function PlayerDetailClient({
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
-                        <TableHead>Course</TableHead>
+                        <TableHead>Venue</TableHead>
                         <TableHead>Opponent Club</TableHead>
                         <TableHead>Partner</TableHead>
                         <TableHead>Opponents</TableHead>
@@ -599,7 +599,7 @@ export function PlayerDetailClient({
                       {matchHistory.map((m) => (
                         <TableRow key={m.id}>
                           <TableCell>{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell>{m.courseName}</TableCell>
+                          <TableCell>{m.venueName}</TableCell>
                           <TableCell>{m.opponentClubName}</TableCell>
                           <TableCell>
                             <Link

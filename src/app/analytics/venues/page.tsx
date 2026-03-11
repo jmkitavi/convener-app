@@ -40,7 +40,7 @@ export default async function VenuesPage() {
             Venue Performance
           </h1>
           <p className="text-muted-foreground">
-            Win rates broken down by course
+            Win rates broken down by venue
           </p>
         </div>
       </div>
@@ -48,7 +48,7 @@ export default async function VenuesPage() {
       {venues.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
-            No venue data yet. Record matches at different courses to see
+            No venue data yet. Record matches at different venues to see
             performance by venue.
           </CardContent>
         </Card>
@@ -58,7 +58,7 @@ export default async function VenuesPage() {
             <CardHeader>
               <CardTitle>Win Rate by Venue</CardTitle>
               <CardDescription>
-                Comparing performance across all courses played
+                Comparing performance across all venues played
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -74,7 +74,7 @@ export default async function VenuesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Course</TableHead>
+                    <TableHead>Venue</TableHead>
                     <TableHead className="text-right">Played</TableHead>
                     <TableHead className="text-right">Wins</TableHead>
                     <TableHead className="text-right">Losses</TableHead>
@@ -86,9 +86,9 @@ export default async function VenuesPage() {
                   {venues.map((v) => {
                     const pct = v.winRate * 100;
                     return (
-                      <TableRow key={v.courseId}>
+                      <TableRow key={v.venueName}>
                         <TableCell className="font-medium">
-                          {v.courseName}
+                          {v.venueName}
                         </TableCell>
                         <TableCell className="text-right">
                           {v.played}

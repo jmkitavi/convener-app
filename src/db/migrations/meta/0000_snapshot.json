@@ -1,54 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d80883d2-aa5c-4338-8a21-612b58525792",
+  "id": "01e3607a-88cc-4c34-a5e1-42f8c67788ed",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "courses": {
-      "name": "courses",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "par": {
-          "name": "par",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "slope_rating": {
-          "name": "slope_rating",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "course_rating": {
-          "name": "course_rating",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "fixtures": {
       "name": "fixtures",
       "columns": {
@@ -68,13 +23,6 @@
         },
         "opponent_club_id": {
           "name": "opponent_club_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "course_id": {
-          "name": "course_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -111,19 +59,6 @@
           "tableTo": "opponent_clubs",
           "columnsFrom": [
             "opponent_club_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "fixtures_course_id_courses_id_fk": {
-          "name": "fixtures_course_id_courses_id_fk",
-          "tableFrom": "fixtures",
-          "tableTo": "courses",
-          "columnsFrom": [
-            "course_id"
           ],
           "columnsTo": [
             "id"
@@ -299,6 +234,27 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "par": {
+          "name": "par",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "slope_rating": {
+          "name": "slope_rating",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "course_rating": {
+          "name": "course_rating",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },

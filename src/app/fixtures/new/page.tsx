@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { fixtures, opponentClubs, courses } from "@/db/schema";
+import { fixtures, opponentClubs } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { FixtureForm } from "@/components/fixture-form";
 
@@ -10,17 +10,11 @@ export default async function NewFixturePage() {
     .from(opponentClubs)
     .orderBy(opponentClubs.name);
 
-  const courseList = await db
-    .select({ id: courses.id, name: courses.name })
-    .from(courses)
-    .orderBy(courses.name);
-
   async function createFixture(formData: FormData) {
     "use server";
 
     const date = formData.get("date") as string;
     const opponentClubId = Number(formData.get("opponentClubId"));
-    const courseId = Number(formData.get("courseId"));
     const homeAway = formData.get("homeAway") as
       | "home"
       | "away"
@@ -29,7 +23,7 @@ export default async function NewFixturePage() {
 
     const [row] = await db
       .insert(fixtures)
-      .values({ date, opponentClubId, courseId, homeAway, notes })
+      .values({ date, opponentClubId, homeAway, notes })
       .returning({ id: fixtures.id });
 
     revalidatePath("/fixtures");
@@ -41,7 +35,6 @@ export default async function NewFixturePage() {
       <h1 className="text-2xl font-semibold tracking-tight">New Fixture</h1>
       <FixtureForm
         clubs={clubs}
-        courses={courseList}
         action={createFixture}
       />
     </div>

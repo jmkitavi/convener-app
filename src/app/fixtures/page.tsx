@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { fixtures, opponentClubs, courses } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { fixtures, opponentClubs } from "@/db/schema";
+import { eq, asc, sql } from "drizzle-orm";
 import {
   Card,
   CardHeader,
@@ -21,12 +21,11 @@ export default async function FixturesPage() {
       homeAway: fixtures.homeAway,
       notes: fixtures.notes,
       clubName: opponentClubs.name,
-      courseName: courses.name,
+      venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
     })
     .from(fixtures)
     .leftJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-    .leftJoin(courses, eq(fixtures.courseId, courses.id))
-    .orderBy(desc(fixtures.date));
+    .orderBy(asc(fixtures.date));
 
   return (
     <div className="space-y-6">
@@ -80,7 +79,7 @@ export default async function FixturesPage() {
                     </span>
                     <span className="flex items-center gap-1">
                       <MapPin className="size-3.5" />
-                      {fixture.courseName ?? "Unknown Course"}
+                      {fixture.venueName ?? "Unknown Venue"}
                     </span>
                   </CardDescription>
                 </CardHeader>

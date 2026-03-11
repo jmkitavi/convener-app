@@ -37,7 +37,7 @@ const subPages = [
   {
     href: "/analytics/venues",
     title: "Venue Performance",
-    description: "Win rates broken down by course",
+    description: "Win rates broken down by venue",
     icon: MapPin,
   },
   {

@@ -14,8 +14,7 @@ export type MatchWithDetails = {
   matchOrder: number | null;
   notes: string | null;
   fixtureDate: string;
-  courseId: number;
-  courseName: string;
+  venueName: string;
   opponentClubId: number;
   opponentClubName: string;
   player1Name: string;
@@ -61,8 +60,7 @@ export type PairingRecord = {
 };
 
 export type VenueRecord = {
-  courseId: number;
-  courseName: string;
+  venueName: string;
   played: number;
   wins: number;
   losses: number;
@@ -84,7 +82,7 @@ export type HandicapBucket = {
 export type FormMatch = {
   id: number;
   fixtureDate: string;
-  courseName: string;
+  venueName: string;
   opponentClubName: string;
   partnerId: number;
   partnerName: string;
@@ -96,7 +94,7 @@ export type FormMatch = {
 export type FixtureResult = {
   fixtureId: number;
   fixtureDate: string;
-  courseName: string;
+  venueName: string;
   opponentClubName: string;
   matches: {
     id: number;
@@ -248,9 +246,8 @@ export function getPairingStats(matches: MatchWithDetails[]): PairingRecord[] {
 
 export function getVenueStats(matches: MatchWithDetails[]): VenueRecord[] {
   const venues = new Map<
-    number,
+    string,
     {
-      courseName: string;
       wins: number;
       losses: number;
       halved: number;
@@ -259,8 +256,7 @@ export function getVenueStats(matches: MatchWithDetails[]): VenueRecord[] {
   >();
 
   for (const m of matches) {
-    const entry = venues.get(m.courseId) ?? {
-      courseName: m.courseName,
+    const entry = venues.get(m.venueName) ?? {
       wins: 0,
       losses: 0,
       halved: 0,
@@ -270,13 +266,12 @@ export function getVenueStats(matches: MatchWithDetails[]): VenueRecord[] {
     if (m.result === "win") entry.wins++;
     else if (m.result === "loss") entry.losses++;
     else entry.halved++;
-    venues.set(m.courseId, entry);
+    venues.set(m.venueName, entry);
   }
 
   return Array.from(venues.entries())
-    .map(([courseId, v]) => ({
-      courseId,
-      courseName: v.courseName,
+    .map(([venueName, v]) => ({
+      venueName,
       played: v.played,
       wins: v.wins,
       losses: v.losses,
@@ -370,7 +365,7 @@ export function getPlayerForm(
     return {
       id: m.id,
       fixtureDate: m.fixtureDate,
-      courseName: m.courseName,
+      venueName: m.venueName,
       opponentClubName: m.opponentClubName,
       partnerId,
       partnerName,
@@ -402,7 +397,7 @@ export function getRecentFixtureResults(
       return {
         fixtureId,
         fixtureDate: first.fixtureDate,
-        courseName: first.courseName,
+        venueName: first.venueName,
         opponentClubName: first.opponentClubName,
         matches: fMatches
           .sort((a, b) => (a.matchOrder ?? 0) - (b.matchOrder ?? 0))

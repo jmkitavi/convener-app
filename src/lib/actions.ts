@@ -4,7 +4,6 @@ import { db } from "@/db";
 import {
   players,
   opponentClubs,
-  courses,
   fixtures,
   matches,
 } from "@/db/schema";
@@ -125,11 +124,21 @@ export async function getPlayer(id: number) {
 // Opponent Clubs
 // ---------------------------------------------------------------------------
 
-export async function createClub(data: { name: string }) {
+export async function createClub(data: {
+  name: string;
+  par?: number;
+  slopeRating?: number;
+  courseRating?: number;
+}) {
   try {
     const result = db
       .insert(opponentClubs)
-      .values({ name: data.name })
+      .values({
+        name: data.name,
+        par: data.par ?? null,
+        slopeRating: data.slopeRating ?? null,
+        courseRating: data.courseRating ?? null,
+      })
       .returning()
       .get();
     revalidatePath("/clubs");
@@ -139,11 +148,19 @@ export async function createClub(data: { name: string }) {
   }
 }
 
-export async function updateClub(id: number, data: { name: string }) {
+export async function updateClub(
+  id: number,
+  data: {
+    name?: string;
+    par?: number | null;
+    slopeRating?: number | null;
+    courseRating?: number | null;
+  },
+) {
   try {
     const result = db
       .update(opponentClubs)
-      .set({ name: data.name })
+      .set(data)
       .where(eq(opponentClubs.id, id))
       .returning()
       .get();
@@ -204,113 +221,12 @@ export async function getClub(id: number) {
 }
 
 // ---------------------------------------------------------------------------
-// Courses
-// ---------------------------------------------------------------------------
-
-export async function createCourse(data: {
-  name: string;
-  par?: number;
-  slopeRating?: number;
-  courseRating?: number;
-}) {
-  try {
-    const result = db
-      .insert(courses)
-      .values({
-        name: data.name,
-        par: data.par ?? null,
-        slopeRating: data.slopeRating ?? null,
-        courseRating: data.courseRating ?? null,
-      })
-      .returning()
-      .get();
-    revalidatePath("/courses");
-    return { success: true, data: result };
-  } catch (e) {
-    return { success: false, error: (e as Error).message };
-  }
-}
-
-export async function updateCourse(
-  id: number,
-  data: {
-    name?: string;
-    par?: number | null;
-    slopeRating?: number | null;
-    courseRating?: number | null;
-  },
-) {
-  try {
-    const result = db
-      .update(courses)
-      .set(data)
-      .where(eq(courses.id, id))
-      .returning()
-      .get();
-    revalidatePath("/courses");
-    revalidatePath(`/courses/${id}`);
-    return { success: true, data: result };
-  } catch (e) {
-    return { success: false, error: (e as Error).message };
-  }
-}
-
-export async function deleteCourse(id: number) {
-  try {
-    const fixtureUsingCourse = db
-      .select({ id: fixtures.id })
-      .from(fixtures)
-      .where(eq(fixtures.courseId, id))
-      .get();
-    if (fixtureUsingCourse) {
-      return {
-        success: false,
-        error: "Cannot delete course that is referenced by a fixture",
-      };
-    }
-    db.delete(courses).where(eq(courses.id, id)).run();
-    revalidatePath("/courses");
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: (e as Error).message };
-  }
-}
-
-export async function getCourses() {
-  try {
-    const result = db
-      .select()
-      .from(courses)
-      .orderBy(asc(courses.name))
-      .all();
-    return { success: true, data: result };
-  } catch (e) {
-    return { success: false, error: (e as Error).message, data: [] as (typeof courses.$inferSelect)[] };
-  }
-}
-
-export async function getCourse(id: number) {
-  try {
-    const result = db
-      .select()
-      .from(courses)
-      .where(eq(courses.id, id))
-      .get();
-    if (!result) return { success: false, error: "Course not found" };
-    return { success: true, data: result };
-  } catch (e) {
-    return { success: false, error: (e as Error).message };
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
 export async function createFixture(data: {
   date: string;
   opponentClubId: number;
-  courseId: number;
   homeAway?: "home" | "away" | "neutral";
   notes?: string;
 }) {
@@ -320,7 +236,6 @@ export async function createFixture(data: {
       .values({
         date: data.date,
         opponentClubId: data.opponentClubId,
-        courseId: data.courseId,
         homeAway: data.homeAway ?? "home",
         notes: data.notes ?? null,
       })
@@ -338,7 +253,6 @@ export async function updateFixture(
   data: {
     date?: string;
     opponentClubId?: number;
-    courseId?: number;
     homeAway?: "home" | "away" | "neutral";
     notes?: string | null;
   },
@@ -374,7 +288,7 @@ export async function getFixtures() {
     const result = db
       .select()
       .from(fixtures)
-      .orderBy(desc(fixtures.date))
+      .orderBy(asc(fixtures.date))
       .all();
     return { success: true, data: result };
   } catch (e) {
@@ -403,19 +317,17 @@ export async function getFixtureWithDetails(id: number) {
         id: fixtures.id,
         date: fixtures.date,
         opponentClubId: fixtures.opponentClubId,
-        courseId: fixtures.courseId,
         homeAway: fixtures.homeAway,
         notes: fixtures.notes,
         createdAt: fixtures.createdAt,
         opponentClubName: opponentClubs.name,
-        courseName: courses.name,
-        coursePar: courses.par,
-        courseSlopeRating: courses.slopeRating,
-        courseRating: courses.courseRating,
+        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
+        clubPar: opponentClubs.par,
+        clubSlopeRating: opponentClubs.slopeRating,
+        clubCourseRating: opponentClubs.courseRating,
       })
       .from(fixtures)
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-      .innerJoin(courses, eq(fixtures.courseId, courses.id))
       .where(eq(fixtures.id, id))
       .get();
     if (!result) return { success: false, error: "Fixture not found" };
@@ -432,17 +344,15 @@ export async function getFixturesWithDetails() {
         id: fixtures.id,
         date: fixtures.date,
         opponentClubId: fixtures.opponentClubId,
-        courseId: fixtures.courseId,
         homeAway: fixtures.homeAway,
         notes: fixtures.notes,
         createdAt: fixtures.createdAt,
         opponentClubName: opponentClubs.name,
-        courseName: courses.name,
+        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
       })
       .from(fixtures)
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-      .innerJoin(courses, eq(fixtures.courseId, courses.id))
-      .orderBy(desc(fixtures.date))
+      .orderBy(asc(fixtures.date))
       .all();
     return { success: true, data: result };
   } catch (e) {
@@ -450,12 +360,11 @@ export async function getFixturesWithDetails() {
       id: number;
       date: string;
       opponentClubId: number;
-      courseId: number;
       homeAway: string;
       notes: string | null;
       createdAt: string;
       opponentClubName: string;
-      courseName: string;
+      venueName: string;
     }> };
   }
 }
@@ -628,12 +537,11 @@ export async function getMatchesByPlayer(playerId: number) {
         notes: matches.notes,
         fixtureDate: fixtures.date,
         opponentClubName: opponentClubs.name,
-        courseName: courses.name,
+        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
       })
       .from(matches)
       .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-      .innerJoin(courses, eq(fixtures.courseId, courses.id))
       .where(
         or(
           eq(matches.player1Id, playerId),
@@ -692,13 +600,11 @@ export async function getAllMatches() {
         homeAway: fixtures.homeAway,
         opponentClubId: fixtures.opponentClubId,
         opponentClubName: opponentClubs.name,
-        courseId: fixtures.courseId,
-        courseName: courses.name,
+        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
       })
       .from(matches)
       .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-      .innerJoin(courses, eq(fixtures.courseId, courses.id))
       .innerJoin(p1, eq(matches.player1Id, p1.id))
       .innerJoin(p2, eq(matches.player2Id, p2.id))
       .orderBy(desc(fixtures.date), asc(matches.matchOrder))

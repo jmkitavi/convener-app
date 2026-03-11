@@ -36,7 +36,7 @@ type Player = {
   createdAt: string;
 };
 
-type Course = {
+type Club = {
   id: number;
   name: string;
   par: number | null;
@@ -62,15 +62,15 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
 
 export function SuggestClient({
   players,
-  courses,
+  clubs,
   allMatches,
 }: {
   players: Player[];
-  courses: Course[];
+  clubs: Club[];
   allMatches: MatchWithDetails[];
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [courseId, setCourseId] = useState<number | undefined>(undefined);
+  const [venueName, setVenueName] = useState<string | undefined>(undefined);
   const [suggestions, setSuggestions] = useState<PairingSuggestion[] | null>(
     null,
   );
@@ -100,7 +100,7 @@ export function SuggestClient({
       .filter((p) => selectedIds.has(p.id))
       .map((p) => ({ id: p.id, name: p.name, handicap: p.defaultHandicap }));
 
-    const results = suggestPairings(available, allMatches, courseId);
+    const results = suggestPairings(available, allMatches, venueName);
     setSuggestions(results);
   }
 
@@ -195,9 +195,9 @@ export function SuggestClient({
             Venue (optional)
           </label>
           <Select
-            value={courseId !== undefined ? String(courseId) : ""}
+            value={venueName ?? ""}
             onValueChange={(val) =>
-              setCourseId(val ? Number(val) : undefined)
+              setVenueName(val || undefined)
             }
           >
             <SelectTrigger className="w-56">
@@ -205,8 +205,8 @@ export function SuggestClient({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Any venue</SelectItem>
-              {courses.map((c) => (
-                <SelectItem key={c.id} value={String(c.id)}>
+              {clubs.map((c) => (
+                <SelectItem key={c.id} value={c.name}>
                   {c.name}
                 </SelectItem>
               ))}

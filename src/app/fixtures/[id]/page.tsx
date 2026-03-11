@@ -5,10 +5,9 @@ import {
   fixtures,
   matches,
   opponentClubs,
-  courses,
   players,
 } from "@/db/schema";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { revalidatePath } from "next/cache";
 import {
@@ -46,15 +45,13 @@ export default async function FixtureDetailPage({
       id: fixtures.id,
       date: fixtures.date,
       opponentClubId: fixtures.opponentClubId,
-      courseId: fixtures.courseId,
       homeAway: fixtures.homeAway,
       notes: fixtures.notes,
       clubName: opponentClubs.name,
-      courseName: courses.name,
+      venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
     })
     .from(fixtures)
     .leftJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-    .leftJoin(courses, eq(fixtures.courseId, courses.id))
     .where(eq(fixtures.id, fixtureId));
 
   if (!fixture) notFound();
@@ -98,11 +95,6 @@ export default async function FixtureDetailPage({
     .select({ id: opponentClubs.id, name: opponentClubs.name })
     .from(opponentClubs)
     .orderBy(opponentClubs.name);
-
-  const courseList = await db
-    .select({ id: courses.id, name: courses.name })
-    .from(courses)
-    .orderBy(courses.name);
 
   // Summary stats
   const wins = matchList.filter((m) => m.result === "win").length;
@@ -150,7 +142,6 @@ export default async function FixtureDetailPage({
 
     const date = formData.get("date") as string;
     const opponentClubId = Number(formData.get("opponentClubId"));
-    const courseId = Number(formData.get("courseId"));
     const homeAway = formData.get("homeAway") as
       | "home"
       | "away"
@@ -159,7 +150,7 @@ export default async function FixtureDetailPage({
 
     await db
       .update(fixtures)
-      .set({ date, opponentClubId, courseId, homeAway, notes })
+      .set({ date, opponentClubId, homeAway, notes })
       .where(eq(fixtures.id, fixtureId));
 
     revalidatePath("/fixtures");
@@ -212,7 +203,7 @@ export default async function FixtureDetailPage({
             </span>
             <span className="flex items-center gap-1">
               <MapPin className="size-3.5" />
-              {fixture.courseName ?? "Unknown Course"}
+              {fixture.venueName ?? "Unknown Venue"}
             </span>
           </div>
           {fixture.notes && (
@@ -238,12 +229,10 @@ export default async function FixtureDetailPage({
             </DialogHeader>
             <FixtureForm
               clubs={clubs}
-              courses={courseList}
               action={updateFixture}
               defaultValues={{
                 date: fixture.date,
                 opponentClubId: fixture.opponentClubId,
-                courseId: fixture.courseId,
                 homeAway: fixture.homeAway,
                 notes: fixture.notes ?? undefined,
               }}

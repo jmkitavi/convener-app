@@ -18,25 +18,17 @@ interface Club {
   name: string;
 }
 
-interface Course {
-  id: number;
-  name: string;
-}
-
 export function FixtureForm({
   clubs,
-  courses,
   action,
   defaultValues,
   submitLabel = "Create Fixture",
 }: {
   clubs: Club[];
-  courses: Course[];
   action: (formData: FormData) => Promise<void>;
   defaultValues?: {
     date?: string;
     opponentClubId?: number;
-    courseId?: number;
     homeAway?: string;
     notes?: string;
   };
@@ -45,9 +37,6 @@ export function FixtureForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [clubId, setClubId] = useState<string | null>(
     defaultValues?.opponentClubId?.toString() ?? null,
-  );
-  const [courseId, setCourseId] = useState<string | null>(
-    defaultValues?.courseId?.toString() ?? null,
   );
   const [homeAway, setHomeAway] = useState<string | null>(
     defaultValues?.homeAway ?? "home",
@@ -58,7 +47,6 @@ export function FixtureForm({
       ref={formRef}
       action={async (formData) => {
         if (clubId) formData.set("opponentClubId", clubId);
-        if (courseId) formData.set("courseId", courseId);
         if (homeAway) formData.set("homeAway", homeAway);
         await action(formData);
       }}
@@ -92,22 +80,6 @@ export function FixtureForm({
       </div>
 
       <div className="grid gap-2">
-        <Label>Course</Label>
-        <Select value={courseId} onValueChange={setCourseId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select a course" />
-          </SelectTrigger>
-          <SelectContent>
-            {courses.map((course) => (
-              <SelectItem key={course.id} value={course.id.toString()}>
-                {course.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="grid gap-2">
         <Label>Home / Away</Label>
         <Select value={homeAway} onValueChange={setHomeAway}>
           <SelectTrigger className="w-full">
@@ -119,6 +91,9 @@ export function FixtureForm({
             <SelectItem value="neutral">Neutral</SelectItem>
           </SelectContent>
         </Select>
+        <p className="text-xs text-muted-foreground">
+          Venue is derived automatically: Home → Kenya Airforce Golf Club, Away → opponent&apos;s club
+        </p>
       </div>
 
       <div className="grid gap-2">

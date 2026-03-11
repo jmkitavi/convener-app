@@ -13,11 +13,6 @@ export const players = sqliteTable("players", {
 export const opponentClubs = sqliteTable("opponent_clubs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
-});
-
-export const courses = sqliteTable("courses", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
   par: integer("par"),
   slopeRating: real("slope_rating"),
   courseRating: real("course_rating"),
@@ -27,7 +22,6 @@ export const fixtures = sqliteTable("fixtures", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   date: text("date").notNull(),
   opponentClubId: integer("opponent_club_id").notNull().references(() => opponentClubs.id),
-  courseId: integer("course_id").notNull().references(() => courses.id),
   homeAway: text("home_away", { enum: ["home", "away", "neutral"] }).notNull().default("home"),
   notes: text("notes"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),

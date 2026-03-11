@@ -8,7 +8,9 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,11 +22,22 @@ import {
 } from "@/components/ui/dialog";
 import { ClubForm } from "@/components/club-form";
 
+function parseOptionalNumber(value: FormDataEntryValue | null): number | null {
+  if (!value || value === "") return null;
+  const num = Number(value);
+  return isNaN(num) ? null : num;
+}
+
 async function createClub(formData: FormData) {
   "use server";
   const name = formData.get("name") as string;
   if (!name?.trim()) return;
-  await db.insert(opponentClubs).values({ name: name.trim() });
+  await db.insert(opponentClubs).values({
+    name: name.trim(),
+    par: parseOptionalNumber(formData.get("par")),
+    slopeRating: parseOptionalNumber(formData.get("slopeRating")),
+    courseRating: parseOptionalNumber(formData.get("courseRating")),
+  });
   revalidatePath("/clubs");
 }
 
@@ -33,7 +46,15 @@ async function updateClub(formData: FormData) {
   const id = Number(formData.get("id"));
   const name = formData.get("name") as string;
   if (!id || !name?.trim()) return;
-  await db.update(opponentClubs).set({ name: name.trim() }).where(eq(opponentClubs.id, id));
+  await db
+    .update(opponentClubs)
+    .set({
+      name: name.trim(),
+      par: parseOptionalNumber(formData.get("par")),
+      slopeRating: parseOptionalNumber(formData.get("slopeRating")),
+      courseRating: parseOptionalNumber(formData.get("courseRating")),
+    })
+    .where(eq(opponentClubs.id, id));
   revalidatePath("/clubs");
 }
 
@@ -54,7 +75,7 @@ export default async function ClubsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Opponent Clubs</h1>
           <p className="text-sm text-muted-foreground">
-            Manage the clubs your team plays against.
+            Manage the clubs your team plays against. Each club is also its course.
           </p>
         </div>
         <Dialog>
@@ -99,6 +120,19 @@ export default async function ClubsPage() {
                   <Building2 className="h-4 w-4 text-emerald-600" />
                   {club.name}
                 </CardTitle>
+                {(club.par || club.slopeRating || club.courseRating) && (
+                  <CardDescription className="flex flex-wrap gap-1.5 pt-1">
+                    {club.par && (
+                      <Badge variant="secondary">Par {club.par}</Badge>
+                    )}
+                    {club.slopeRating && (
+                      <Badge variant="secondary">Slope {club.slopeRating}</Badge>
+                    )}
+                    {club.courseRating && (
+                      <Badge variant="secondary">Rating {club.courseRating}</Badge>
+                    )}
+                  </CardDescription>
+                )}
               </CardHeader>
               <CardContent className="flex items-center gap-2">
                 <Dialog>
@@ -114,12 +148,18 @@ export default async function ClubsPage() {
                     <DialogHeader>
                       <DialogTitle>Edit Club</DialogTitle>
                       <DialogDescription>
-                        Update the club name.
+                        Update the club details.
                       </DialogDescription>
                     </DialogHeader>
                     <ClubForm
                       action={updateClub}
-                      defaultValues={{ id: club.id, name: club.name }}
+                      defaultValues={{
+                        id: club.id,
+                        name: club.name,
+                        par: club.par,
+                        slopeRating: club.slopeRating,
+                        courseRating: club.courseRating,
+                      }}
                       submitLabel="Save Changes"
                     />
                   </DialogContent>

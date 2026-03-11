@@ -5,7 +5,6 @@ import {
   Users,
   Calendar,
   Building2,
-  MapPin,
   BarChart3,
 } from "lucide-react";
 import {
@@ -190,7 +189,7 @@ export default async function DashboardPage() {
                       month: "short",
                       year: "numeric",
                     })}{" "}
-                    · {f.courseName}
+                    · {f.venueName}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -279,7 +278,6 @@ function EmptyState() {
   const links = [
     { href: "/players", label: "Add Players", icon: Users },
     { href: "/clubs", label: "Add Clubs", icon: Building2 },
-    { href: "/courses", label: "Add Courses", icon: MapPin },
     { href: "/fixtures", label: "Create a Fixture", icon: Calendar },
   ];
 
@@ -298,7 +296,7 @@ function EmptyState() {
           <h2 className="text-lg font-semibold">Welcome to Convener!</h2>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
             Get started by setting up your league. Add players, opponent clubs,
-            courses, then create your first fixture and record match results.
+            then create your first fixture and record match results.
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             {links.map(({ href, label, icon: Icon }) => (

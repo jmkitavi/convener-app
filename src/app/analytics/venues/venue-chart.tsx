@@ -20,7 +20,7 @@ const COLORS = {
 
 export function VenueChart({ venues }: { venues: VenueRecord[] }) {
   const data = venues.map((v) => ({
-    name: v.courseName,
+    name: v.venueName,
     Wins: v.wins,
     Losses: v.losses,
     Halved: v.halved,
