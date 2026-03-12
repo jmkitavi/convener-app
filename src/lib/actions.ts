@@ -578,6 +578,22 @@ export async function getAllMatches() {
       .from(players)
       .as("p2");
 
+    const o1 = db
+      .select({
+        id: players.id,
+        name: players.name,
+      })
+      .from(players)
+      .as("o1");
+
+    const o2 = db
+      .select({
+        id: players.id,
+        name: players.name,
+      })
+      .from(players)
+      .as("o2");
+
     const result = db
       .select({
         id: matches.id,
@@ -590,12 +606,16 @@ export async function getAllMatches() {
         opponent2Name: matches.opponent2Name,
         opponent1Handicap: matches.opponent1Handicap,
         opponent2Handicap: matches.opponent2Handicap,
+        opponent1Id: matches.opponent1Id,
+        opponent2Id: matches.opponent2Id,
         result: matches.result,
         margin: matches.margin,
         matchOrder: matches.matchOrder,
         notes: matches.notes,
         player1Name: p1.name,
         player2Name: p2.name,
+        opponent1PlayerName: o1.name,
+        opponent2PlayerName: o2.name,
         fixtureDate: fixtures.date,
         homeAway: fixtures.homeAway,
         opponentClubId: fixtures.opponentClubId,
@@ -607,6 +627,8 @@ export async function getAllMatches() {
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
       .innerJoin(p1, eq(matches.player1Id, p1.id))
       .innerJoin(p2, eq(matches.player2Id, p2.id))
+      .leftJoin(o1, eq(matches.opponent1Id, o1.id))
+      .leftJoin(o2, eq(matches.opponent2Id, o2.id))
       .orderBy(desc(fixtures.date), asc(matches.matchOrder))
       .all();
     return { success: true, data: result };

@@ -8,6 +8,9 @@ import {
   getPlayerStats,
   getPlayerForm,
   getPlayerVenueStats,
+  isPlayerInMatch,
+  isOnOpponentSide,
+  effectiveResult,
   type MatchWithDetails,
 } from "@/lib/analytics";
 import { PlayerDetailClient } from "./player-detail-client";
@@ -73,37 +76,62 @@ export default async function PlayerDetailPage({
   const form = getPlayerForm(allMatches, player.id, 10);
   const venueStats = getPlayerVenueStats(allMatches, player.id);
 
-  // Handicap trend — chronological order
+  // Handicap trend — chronological order (includes opponent-side appearances)
   const playerMatchesSorted = allMatches
-    .filter((m) => m.player1Id === player.id || m.player2Id === player.id)
+    .filter((m) => isPlayerInMatch(m, player.id))
     .sort(
       (a, b) =>
         new Date(a.fixtureDate).getTime() - new Date(b.fixtureDate).getTime()
     );
 
-  const handicapTrend = playerMatchesSorted.map((m) => ({
-    date: m.fixtureDate,
-    handicap:
-      m.player1Id === player.id ? m.player1Handicap : m.player2Handicap,
-    result: m.result,
-  }));
+  const handicapTrend = playerMatchesSorted.map((m) => {
+    const onOppSide = isOnOpponentSide(m, player.id);
+    let handicap: number;
+    if (onOppSide) {
+      handicap = m.opponent1Id === player.id ? m.opponent1Handicap : m.opponent2Handicap;
+    } else {
+      handicap = m.player1Id === player.id ? m.player1Handicap : m.player2Handicap;
+    }
+    return {
+      date: m.fixtureDate,
+      handicap,
+      result: effectiveResult(m, player.id),
+    };
+  });
 
-  // Match history — newest first
-  const matchHistory = [...playerMatchesSorted].reverse().map((m) => ({
-    id: m.id,
-    fixtureDate: m.fixtureDate,
-    venueName: m.venueName,
-    opponentClubName: m.opponentClubName,
-    partnerId: m.player1Id === player.id ? m.player2Id : m.player1Id,
-    partnerName:
-      m.player1Id === player.id ? m.player2Name : m.player1Name,
-    opponent1Name: m.opponent1Name,
-    opponent2Name: m.opponent2Name,
-    result: m.result,
-    margin: m.margin,
-    playerHandicap:
-      m.player1Id === player.id ? m.player1Handicap : m.player2Handicap,
-  }));
+  // Match history — newest first (includes opponent-side appearances)
+  const matchHistory = [...playerMatchesSorted].reverse().map((m) => {
+    const onOppSide = isOnOpponentSide(m, player.id);
+    let partnerId: number;
+    let partnerName: string;
+    let playerHandicap: number;
+
+    if (onOppSide) {
+      partnerId = m.opponent1Id === player.id ? (m.opponent2Id ?? 0) : (m.opponent1Id ?? 0);
+      partnerName = m.opponent1Id === player.id
+        ? (m.opponent2PlayerName ?? m.opponent2Name)
+        : (m.opponent1PlayerName ?? m.opponent1Name);
+      playerHandicap = m.opponent1Id === player.id ? m.opponent1Handicap : m.opponent2Handicap;
+    } else {
+      partnerId = m.player1Id === player.id ? m.player2Id : m.player1Id;
+      partnerName = m.player1Id === player.id ? m.player2Name : m.player1Name;
+      playerHandicap = m.player1Id === player.id ? m.player1Handicap : m.player2Handicap;
+    }
+
+    return {
+      id: m.id,
+      fixtureDate: m.fixtureDate,
+      venueName: m.venueName,
+      opponentClubName: m.opponentClubName,
+      partnerId,
+      partnerName,
+      opponent1Name: onOppSide ? m.player1Name : m.opponent1Name,
+      opponent2Name: onOppSide ? m.player2Name : m.opponent2Name,
+      result: effectiveResult(m, player.id),
+      margin: m.margin,
+      playerHandicap,
+    };
+  });
 
   return (
     <PlayerDetailClient

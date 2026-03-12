@@ -57,14 +57,27 @@ export default async function DashboardPage() {
   const record = getTeamRecord(allMatches);
   const recentFixtures = getRecentFixtureResults(allMatches, 5);
 
-  // Player appearance counts and win rates
+  // Player appearance counts and win rates (includes opponent-side for internal matches)
   const playerMap = new Map<number, { name: string; played: number; wins: number }>();
   for (const m of allMatches) {
+    // Team side players
     for (const pid of [m.player1Id, m.player2Id]) {
       const name = pid === m.player1Id ? m.player1Name : m.player2Name;
       const entry = playerMap.get(pid) ?? { name, played: 0, wins: 0 };
       entry.played++;
       if (m.result === "win") entry.wins++;
+      playerMap.set(pid, entry);
+    }
+    // Opponent-side players in internal matches
+    for (const pid of [m.opponent1Id, m.opponent2Id]) {
+      if (!pid) continue;
+      const name = pid === m.opponent1Id
+        ? (m.opponent1PlayerName ?? m.opponent1Name)
+        : (m.opponent2PlayerName ?? m.opponent2Name);
+      const entry = playerMap.get(pid) ?? { name, played: 0, wins: 0 };
+      entry.played++;
+      if (m.result === "loss") entry.wins++; // flipped
+      else if (m.result === "halved") { /* no win credit */ }
       playerMap.set(pid, entry);
     }
   }

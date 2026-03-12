@@ -62,6 +62,8 @@ export default async function FixtureDetailPage({
   const matchList = await db
     .select({
       id: matches.id,
+      player1Id: matches.player1Id,
+      player2Id: matches.player2Id,
       player1Name: p1.name,
       player2Name: p2.name,
       player1Handicap: matches.player1Handicap,
@@ -70,6 +72,8 @@ export default async function FixtureDetailPage({
       opponent2Name: matches.opponent2Name,
       opponent1Handicap: matches.opponent1Handicap,
       opponent2Handicap: matches.opponent2Handicap,
+      opponent1Id: matches.opponent1Id,
+      opponent2Id: matches.opponent2Id,
       result: matches.result,
       margin: matches.margin,
       matchOrder: matches.matchOrder,
@@ -100,11 +104,17 @@ export default async function FixtureDetailPage({
   const wins = matchList.filter((m) => m.result === "win").length;
   const losses = matchList.filter((m) => m.result === "loss").length;
   const halved = matchList.filter((m) => m.result === "halved").length;
+  const pending = matchList.filter((m) => m.result === "pending").length;
+
+  // Internal match = opponent club name contains "Kenya Airforce"
+  const isInternalMatch = (fixture.clubName ?? "").includes("Kenya Airforce");
 
   async function createMatch(formData: FormData) {
     "use server";
 
     const fId = Number(formData.get("fixtureId"));
+    const o1Id = formData.get("opponent1Id");
+    const o2Id = formData.get("opponent2Id");
 
     await db.insert(matches).values({
       fixtureId: fId,
@@ -116,6 +126,8 @@ export default async function FixtureDetailPage({
       opponent2Name: formData.get("opponent2Name") as string,
       opponent1Handicap: Number(formData.get("opponent1Handicap")),
       opponent2Handicap: Number(formData.get("opponent2Handicap")),
+      opponent1Id: o1Id ? Number(o1Id) : null,
+      opponent2Id: o2Id ? Number(o2Id) : null,
       result: formData.get("result") as "win" | "loss" | "halved",
       margin: (formData.get("margin") as string) || null,
       notes: (formData.get("notes") as string) || null,
@@ -132,6 +144,40 @@ export default async function FixtureDetailPage({
     const fId = Number(formData.get("fixtureId"));
 
     await db.delete(matches).where(eq(matches.id, matchId));
+
+    revalidatePath(`/fixtures/${fId}`);
+    redirect(`/fixtures/${fId}`);
+  }
+
+  async function updateMatch(formData: FormData) {
+    "use server";
+
+    const matchId = Number(formData.get("matchId"));
+    const fId = Number(formData.get("fixtureId"));
+    const o1Id = formData.get("opponent1Id");
+    const o2Id = formData.get("opponent2Id");
+
+    await db
+      .update(matches)
+      .set({
+        player1Id: Number(formData.get("player1Id")),
+        player2Id: Number(formData.get("player2Id")),
+        player1Handicap: Number(formData.get("player1Handicap")),
+        player2Handicap: Number(formData.get("player2Handicap")),
+        opponent1Name: formData.get("opponent1Name") as string,
+        opponent2Name: formData.get("opponent2Name") as string,
+        opponent1Handicap: Number(formData.get("opponent1Handicap")),
+        opponent2Handicap: Number(formData.get("opponent2Handicap")),
+        opponent1Id: o1Id ? Number(o1Id) : null,
+        opponent2Id: o2Id ? Number(o2Id) : null,
+        result: formData.get("result") as "win" | "loss" | "halved" | "pending",
+        margin: (formData.get("margin") as string) || null,
+        matchOrder: formData.get("matchOrder")
+          ? Number(formData.get("matchOrder"))
+          : null,
+        notes: (formData.get("notes") as string) || null,
+      })
+      .where(eq(matches.id, matchId));
 
     revalidatePath(`/fixtures/${fId}`);
     redirect(`/fixtures/${fId}`);
@@ -161,12 +207,14 @@ export default async function FixtureDetailPage({
   function resultLabel(r: string) {
     if (r === "win") return "W";
     if (r === "loss") return "L";
+    if (r === "pending") return "?";
     return "H";
   }
 
   function resultVariant(r: string) {
     if (r === "win") return "default" as const;
     if (r === "loss") return "destructive" as const;
+    if (r === "pending") return "secondary" as const;
     return "outline" as const;
   }
 
@@ -261,6 +309,11 @@ export default async function FixtureDetailPage({
               <span className="text-sm">
                 <strong className="text-muted-foreground">{halved}</strong> H
               </span>
+              {pending > 0 && (
+                <span className="text-sm">
+                  <strong className="text-yellow-600">{pending}</strong> Pending
+                </span>
+              )}
             </>
           )}
         </CardContent>
@@ -290,6 +343,7 @@ export default async function FixtureDetailPage({
                 players={activePlayers}
                 fixtureId={fixtureId}
                 action={createMatch}
+                isInternalMatch={isInternalMatch}
               />
             </DialogContent>
           </Dialog>
@@ -309,15 +363,35 @@ export default async function FixtureDetailPage({
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                       <span className="font-medium">
-                        {match.player1Name ?? "?"} ({match.player1Handicap})
+                        <Link href={`/players/${match.player1Id}`} className="underline-offset-2 hover:underline">
+                          {match.player1Name ?? "?"}
+                        </Link>{" "}
+                        ({match.player1Handicap})
                         {" & "}
-                        {match.player2Name ?? "?"} ({match.player2Handicap})
+                        <Link href={`/players/${match.player2Id}`} className="underline-offset-2 hover:underline">
+                          {match.player2Name ?? "?"}
+                        </Link>{" "}
+                        ({match.player2Handicap})
                       </span>
                       <span className="text-muted-foreground">vs</span>
                       <span>
-                        {match.opponent1Name} ({match.opponent1Handicap})
+                        {match.opponent1Id ? (
+                          <Link href={`/players/${match.opponent1Id}`} className="underline-offset-2 hover:underline">
+                            {match.opponent1Name}
+                          </Link>
+                        ) : (
+                          match.opponent1Name
+                        )}{" "}
+                        ({match.opponent1Handicap})
                         {" & "}
-                        {match.opponent2Name} ({match.opponent2Handicap})
+                        {match.opponent2Id ? (
+                          <Link href={`/players/${match.opponent2Id}`} className="underline-offset-2 hover:underline">
+                            {match.opponent2Name}
+                          </Link>
+                        ) : (
+                          match.opponent2Name
+                        )}{" "}
+                        ({match.opponent2Handicap})
                       </span>
                     </div>
                     {match.notes && (
@@ -331,6 +405,51 @@ export default async function FixtureDetailPage({
                       {resultLabel(match.result)}
                       {match.margin ? ` ${match.margin}` : ""}
                     </Badge>
+                    <Dialog>
+                      <DialogTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Pencil />
+                          </Button>
+                        }
+                      />
+                      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+                        <DialogHeader>
+                          <DialogTitle>Edit Match #{match.matchOrder ?? match.id}</DialogTitle>
+                          <DialogDescription>
+                            Update the match details below.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <MatchForm
+                          players={activePlayers}
+                          fixtureId={fixtureId}
+                          matchId={match.id}
+                          action={updateMatch}
+                          submitLabel="Update Match"
+                          isInternalMatch={isInternalMatch}
+                          defaultValues={{
+                            player1Id: match.player1Id,
+                            player2Id: match.player2Id,
+                            player1Handicap: match.player1Handicap,
+                            player2Handicap: match.player2Handicap,
+                            opponent1Name: match.opponent1Name,
+                            opponent2Name: match.opponent2Name,
+                            opponent1Handicap: match.opponent1Handicap,
+                            opponent2Handicap: match.opponent2Handicap,
+                            opponent1Id: match.opponent1Id,
+                            opponent2Id: match.opponent2Id,
+                            result: match.result,
+                            margin: match.margin ?? undefined,
+                            matchOrder: match.matchOrder ?? undefined,
+                            notes: match.notes ?? undefined,
+                          }}
+                        />
+                      </DialogContent>
+                    </Dialog>
                     <form action={deleteMatch}>
                       <input type="hidden" name="matchId" value={match.id} />
                       <input
