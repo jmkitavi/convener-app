@@ -22,7 +22,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { PlayerForm } from "@/components/player-form";
-import { PlusIcon, PencilIcon, EyeIcon } from "lucide-react";
+import { PlusIcon, PencilIcon, EyeIcon, ArrowUpDown } from "lucide-react";
 
 interface Player {
   id: number;
@@ -48,12 +48,17 @@ export function PlayersListClient({
   togglePlayerActive,
 }: PlayersListClientProps) {
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"name" | "handicap">("name");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
 
-  const filtered = players.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = players
+    .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) =>
+      sortBy === "handicap"
+        ? a.defaultHandicap - b.defaultHandicap
+        : a.name.localeCompare(b.name)
+    );
 
   async function handleCreate(formData: FormData) {
     await createPlayer(formData);
@@ -104,6 +109,24 @@ export function PlayersListClient({
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-sm"
         />
+        <div className="flex items-center gap-1">
+          <Button
+            variant={sortBy === "name" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSortBy("name")}
+          >
+            <ArrowUpDown className="size-3.5" />
+            Name
+          </Button>
+          <Button
+            variant={sortBy === "handicap" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setSortBy("handicap")}
+          >
+            <ArrowUpDown className="size-3.5" />
+            Handicap
+          </Button>
+        </div>
         <span className="text-sm text-muted-foreground">
           {filtered.length} player{filtered.length !== 1 ? "s" : ""}
         </span>
