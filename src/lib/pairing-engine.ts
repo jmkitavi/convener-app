@@ -389,6 +389,7 @@ export type CounterMatchup = {
     recentForm: number;
     venueAffinity: number;
     bandCoherence: number;
+    playerStrength: number;
   };
   strokeAnalysis: StrokeAnalysis;
   effectiveSpread: number;
@@ -403,12 +404,17 @@ export type CounterPairingResult = {
   tierSummary: { target: number; competitive: number; concede: number };
 };
 
+/** Player priority thresholds */
+const MUST_PLAY_THRESHOLD = 14; // handicap < 14 must always be drafted
+const BENCH_THRESHOLD = 21; // handicap >= 21 only drafted when stronger players exhausted
+
 const COUNTER_WEIGHTS = {
-  competitiveness: 0.45,
+  competitiveness: 0.40,
   historicalWinRate: 0.25,
   recentForm: 0.15,
   venueAffinity: 0.10,
   bandCoherence: 0.05,
+  playerStrength: 0.05,
 } as const;
 
 /**
@@ -561,6 +567,16 @@ function scoreBandCoherence(
   if (rawSpread <= 12) return 0.4;
   if (rawSpread <= 16) return 0.2;
   return 0.0;
+}
+
+/**
+ * Score player strength — prefer fielding stronger (lower handicap) players.
+ * Normalized so a pair of scratch golfers scores 1.0 and a pair of 30+ scores 0.0.
+ */
+function scorePlayerStrength(ourH1: number, ourH2: number): number {
+  const combined = ourH1 + ourH2;
+  // 0 combined = 1.0, 60 combined = 0.0
+  return Math.max(0, Math.min(1, 1 - combined / 60));
 }
 
 function generateCounterReasoning(
@@ -761,6 +777,7 @@ export function suggestCounterPairings(
       recentForm: Math.round(formResult.score * 1000) / 1000,
       venueAffinity: Math.round(venueResult.score * 1000) / 1000,
       bandCoherence: Math.round(bandScore * 1000) / 1000,
+      playerStrength: Math.round(scorePlayerStrength(p1.handicap, p2.handicap) * 1000) / 1000,
     };
 
     const totalScore =
@@ -768,7 +785,8 @@ export function suggestCounterPairings(
       breakdown.historicalWinRate * COUNTER_WEIGHTS.historicalWinRate +
       breakdown.recentForm * COUNTER_WEIGHTS.recentForm +
       breakdown.venueAffinity * COUNTER_WEIGHTS.venueAffinity +
-      breakdown.bandCoherence * COUNTER_WEIGHTS.bandCoherence;
+      breakdown.bandCoherence * COUNTER_WEIGHTS.bandCoherence +
+      breakdown.playerStrength * COUNTER_WEIGHTS.playerStrength;
 
     const tier = classifyTier(effectiveSpread);
 
@@ -835,24 +853,50 @@ export function suggestCounterPairings(
   const usedPlayerIds = new Set<number>();
   const matchups: CounterMatchup[] = [];
 
-  // Phase 2a: Assign best pairs to competitive matches
-  for (const opp of competitiveOpps) {
+  /**
+   * Build the candidate pool for a match, enforcing strength-first drafting.
+   * Must-play (<14 hcp) and preferred (14–20) players are considered first.
+   * Bench (21+) players only enter the pool when stronger players are exhausted.
+   */
+  const buildCandidatePool = (): AvailablePlayer[] => {
     const remaining = availablePlayers.filter(
       (p) => !usedPlayerIds.has(p.id),
     );
-    if (remaining.length < 2) break;
+    // Separate into tiers
+    const mustPlay = remaining.filter((p) => p.handicap < MUST_PLAY_THRESHOLD);
+    const preferred = remaining.filter(
+      (p) => p.handicap >= MUST_PLAY_THRESHOLD && p.handicap < BENCH_THRESHOLD,
+    );
+    const bench = remaining.filter((p) => p.handicap >= BENCH_THRESHOLD);
+
+    // Start with must-play + preferred
+    const pool = [...mustPlay, ...preferred];
+    // Only add bench players if pool has fewer than 2
+    if (pool.length < 2) {
+      pool.push(...bench);
+    }
+    return pool;
+  };
+
+  // Helper: assign best pair from a candidate pool to an opponent match
+  const assignMatch = (
+    opp: typeof competitiveOpps[0],
+    tierOverride?: MatchTier,
+  ): boolean => {
+    const pool = buildCandidatePool();
+    if (pool.length < 2) return false;
 
     let bestScore = -1;
     let bestResult: ReturnType<typeof scorePairVsOpponent> | null = null;
     let bestPair: [AvailablePlayer, AvailablePlayer] | null = null;
 
-    for (let i = 0; i < remaining.length; i++) {
-      for (let j = i + 1; j < remaining.length; j++) {
-        const result = scorePairVsOpponent(remaining[i], remaining[j], opp);
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = i + 1; j < pool.length; j++) {
+        const result = scorePairVsOpponent(pool[i], pool[j], opp);
         if (result.totalScore > bestScore) {
           bestScore = result.totalScore;
           bestResult = result;
-          bestPair = [remaining[i], remaining[j]];
+          bestPair = [pool[i], pool[j]];
         }
       }
     }
@@ -860,10 +904,11 @@ export function suggestCounterPairings(
     if (bestPair && bestResult) {
       usedPlayerIds.add(bestPair[0].id);
       usedPlayerIds.add(bestPair[1].id);
+      const tier = tierOverride ?? bestResult.tier;
       const reasoning = generateCounterReasoning(
         bestResult.strokeAnalysis,
         bestResult.effectiveSpread,
-        bestResult.tier,
+        tier,
         bestResult.pairData,
         bestResult.formResult,
         bestResult.venueResult,
@@ -878,59 +923,77 @@ export function suggestCounterPairings(
         ourPlayer2: bestPair[1],
         opponent: opp,
         score: Math.round(bestScore * 1000) / 1000,
-        tier: bestResult.tier,
+        tier,
         breakdown: bestResult.breakdown,
         strokeAnalysis: bestResult.strokeAnalysis,
         effectiveSpread: bestResult.effectiveSpread,
         reasoning,
       });
+      return true;
     }
+    return false;
+  };
+
+  // Phase 2a: Assign pairs to competitive matches (best matchup from strongest available)
+  for (const opp of competitiveOpps) {
+    assignMatch(opp);
   }
 
-  // Phase 2b: Assign weakest remaining players to concession matches
+  // Phase 2b: Assign pairs to concession matches (still draws from strongest available first)
   for (const opp of concessionOpps) {
-    const remaining = availablePlayers.filter(
-      (p) => !usedPlayerIds.has(p.id),
-    );
-    if (remaining.length < 2) break;
+    assignMatch(opp, "concede");
+  }
 
-    // For concession: pick the two HIGHEST handicap (weakest) remaining players
-    // to preserve stronger players for competitive matches (already assigned above)
-    const sortedByHcp = [...remaining].sort(
-      (a, b) => b.handicap - a.handicap,
-    );
-    const p1 = sortedByHcp[0];
-    const p2 = sortedByHcp[1];
-
-    const result = scorePairVsOpponent(p1, p2, opp);
-    usedPlayerIds.add(p1.id);
-    usedPlayerIds.add(p2.id);
-
-    const reasoning = generateCounterReasoning(
-      result.strokeAnalysis,
-      result.effectiveSpread,
-      "concede" as MatchTier,
-      result.pairData,
-      result.formResult,
-      result.venueResult,
-      opp.isRedMatch,
-      venueName,
-      p1.name,
-      p2.name,
-    );
-
-    matchups.push({
-      matchNumber: opp.originalIndex + 1,
-      ourPlayer1: p1,
-      ourPlayer2: p2,
-      opponent: opp,
-      score: Math.round(result.totalScore * 1000) / 1000,
-      tier: "concede",
-      breakdown: result.breakdown,
-      strokeAnalysis: result.strokeAnalysis,
-      effectiveSpread: result.effectiveSpread,
-      reasoning,
-    });
+  // Safety net: ensure no must-play player (<14) is left on reserves
+  const reserves = availablePlayers.filter((p) => !usedPlayerIds.has(p.id));
+  const strandedMustPlay = reserves.filter(
+    (p) => p.handicap < MUST_PLAY_THRESHOLD,
+  );
+  for (const mustPlay of strandedMustPlay) {
+    // Find the matchup with the weakest (highest hcp) drafted player and swap
+    let worstDraftedHcp = -1;
+    let worstMatchIdx = -1;
+    let worstSlot: 1 | 2 = 1;
+    for (let mi = 0; mi < matchups.length; mi++) {
+      const m = matchups[mi];
+      if (m.ourPlayer1.handicap > worstDraftedHcp) {
+        worstDraftedHcp = m.ourPlayer1.handicap;
+        worstMatchIdx = mi;
+        worstSlot = 1;
+      }
+      if (m.ourPlayer2.handicap > worstDraftedHcp) {
+        worstDraftedHcp = m.ourPlayer2.handicap;
+        worstMatchIdx = mi;
+        worstSlot = 2;
+      }
+    }
+    if (worstMatchIdx >= 0 && worstDraftedHcp > mustPlay.handicap) {
+      const m = matchups[worstMatchIdx];
+      const swappedOut = worstSlot === 1 ? m.ourPlayer1 : m.ourPlayer2;
+      usedPlayerIds.delete(swappedOut.id);
+      usedPlayerIds.add(mustPlay.id);
+      if (worstSlot === 1) m.ourPlayer1 = mustPlay;
+      else m.ourPlayer2 = mustPlay;
+      // Re-score the matchup
+      const updated = scorePairVsOpponent(m.ourPlayer1, m.ourPlayer2, m.opponent);
+      m.score = Math.round(updated.totalScore * 1000) / 1000;
+      m.breakdown = updated.breakdown;
+      m.strokeAnalysis = updated.strokeAnalysis;
+      m.effectiveSpread = updated.effectiveSpread;
+      m.tier = m.tier === "concede" ? "concede" : updated.tier;
+      m.reasoning = generateCounterReasoning(
+        updated.strokeAnalysis,
+        updated.effectiveSpread,
+        m.tier,
+        updated.pairData,
+        updated.formResult,
+        updated.venueResult,
+        m.opponent.isRedMatch,
+        venueName,
+        m.ourPlayer1.name,
+        m.ourPlayer2.name,
+      );
+    }
   }
 
   // Re-sort by original match order for display

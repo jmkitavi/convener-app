@@ -266,11 +266,12 @@ Phase 4: Optimally assign remaining players to winnable matches
 | Factor | Current Weight | Proposed Weight | Rationale |
 |--------|---------------|-----------------|-----------|
 | Stroke Advantage | 0.40 | **0.00** | Remove — replaced by competitiveness |
-| **Competitiveness** | — | **0.45** | New primary metric |
+| **Competitiveness** | — | **0.40** | Primary metric (effective spread + deficit) |
 | Historical Win Rate | 0.25 | **0.25** | Keep — proven pairs matter |
 | Recent Form | 0.20 | **0.15** | Slight reduction |
 | Venue Affinity | 0.15 | **0.10** | Less important |
-| **Band Coherence** | — | **0.05** | New secondary metric |
+| **Band Coherence** | — | **0.05** | All 4 in similar handicap range |
+| **Player Strength** | — | **0.05** | Prefer fielding stronger players |
 
 ### 9.4 Concession Strategy
 
@@ -281,6 +282,40 @@ When facing significantly stronger teams:
 - **Goal**: Maximize total points, not per-match competitiveness
 
 Example at Thika: Instead of putting Ocharo & Mutooni against Otuke & Omondi (lost 9&7), concede that match with expendable players and use competitive players where the gap is closable.
+
+### 9.5 Player Priority Rules (Strength-First Drafting)
+
+**Core principle**: Stronger players put up a better fight regardless of stroke differentials. The engine must never leave a strong player on the bench while fielding a weaker one.
+
+**Thresholds:**
+| Tier | Handicap | Rule |
+|------|----------|------|
+| Must-play | < 14 | MUST be drafted — never left as reserves |
+| Preferred | 14–20 | Standard drafting pool |
+| Bench | 21+ | Only drafted when must-play + preferred are exhausted |
+
+**Implementation — built into the pairing loop, not a post-fix:**
+
+1. Before each match assignment, build the candidate pool:
+   - Include all remaining must-play + preferred players
+   - Only include bench players if fewer than 2 must-play/preferred remain
+2. The greedy algorithm evaluates pairs from this filtered pool
+3. This naturally ensures bench (21+) players are never considered while stronger players are available
+4. A `playerStrength` scoring bonus (weight 0.05) further tips tie-breaking toward lower-handicap pairs
+
+**Safety net**: After all matches are assigned, verify no sub-14 player is on reserves. If found, swap with the highest-handicap drafted player.
+
+**Why this matters**: At Thika, even our losses by narrow margins (1 up, 2 up) featured players in the 13–17 range. These players are competitive in NDC league play. Players above 21 handicap struggle even with maximum stroke allowance against opponent anchors.
+
+**Updated weights (v3):**
+| Factor | Weight | Purpose |
+|--------|--------|---------|
+| Competitiveness | 0.40 | Effective spread + deficit penalty |
+| Historical Win Rate | 0.25 | Proven pair performance |
+| Recent Form | 0.15 | Individual recent results |
+| Venue Affinity | 0.10 | Performance at specific courses |
+| Band Coherence | 0.05 | All 4 players in similar range |
+| Player Strength | 0.05 | Prefer lower handicap pairs |
 
 ---
 

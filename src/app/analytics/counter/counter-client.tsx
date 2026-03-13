@@ -965,6 +965,7 @@ export function CounterClient({
                             <ScoreBar label="Win Rate" value={m.breakdown.historicalWinRate} />
                             <ScoreBar label="Form" value={m.breakdown.recentForm} />
                             <ScoreBar label="Band" value={m.breakdown.bandCoherence} />
+                            <ScoreBar label="Strength" value={m.breakdown.playerStrength} />
                           </div>
 
                           {/* Reasoning */}
