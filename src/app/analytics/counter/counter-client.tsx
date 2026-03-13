@@ -35,6 +35,7 @@ import {
   type AvailablePlayer,
   type OpponentPair,
   type CounterPairingResult,
+  type MatchTier,
 } from "@/lib/pairing-engine";
 import type { MatchWithDetails } from "@/lib/analytics";
 import { saveLineup, getLineup, deleteLineup } from "@/lib/actions";
@@ -713,7 +714,7 @@ export function CounterClient({
         >
           <div className="space-y-4">
             {/* Summary */}
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
               <Card size="sm">
                 <CardContent className="flex items-center gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
@@ -754,6 +755,23 @@ export function CounterClient({
               </Card>
               <Card size="sm">
                 <CardContent className="flex items-center gap-3">
+                  <div className="flex flex-col items-center gap-0.5 shrink-0">
+                    <span className="text-xs font-bold text-emerald-600">🎯 {result.tierSummary.target}</span>
+                    <span className="text-xs font-bold text-amber-600">⚔ {result.tierSummary.competitive}</span>
+                    <span className="text-xs font-bold text-gray-400">🏳 {result.tierSummary.concede}</span>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Match Strategy</p>
+                    <p className="text-sm">
+                      <span className="text-emerald-600">{result.tierSummary.target} target</span>
+                      {result.tierSummary.competitive > 0 && <span className="text-amber-600"> · {result.tierSummary.competitive} fight</span>}
+                      {result.tierSummary.concede > 0 && <span className="text-gray-400"> · {result.tierSummary.concede} concede</span>}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card size="sm">
+                <CardContent className="flex items-center gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
                     <span className="text-sm font-bold">
                       {result.unpairedPlayers.length}
@@ -779,30 +797,74 @@ export function CounterClient({
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3">
-                {result.matchups.map((m) => (
+              <div className="space-y-6">
+                {/* Group by tier */}
+                {(["target", "competitive", "concede"] as const).map((tier) => {
+                  const tierMatchups = result.matchups.filter((m) => m.tier === tier);
+                  if (tierMatchups.length === 0) return null;
+                  const tierConfig = {
+                    target: { label: "🎯 Target Wins", color: "text-emerald-700", border: "border-emerald-200", bg: "bg-emerald-50" },
+                    competitive: { label: "⚔ Competitive", color: "text-amber-700", border: "border-amber-200", bg: "bg-amber-50" },
+                    concede: { label: "🏳 Concede", color: "text-gray-500", border: "border-gray-200", bg: "bg-gray-50" },
+                  }[tier];
+                  return (
+                    <div key={tier}>
+                      <div className={`flex items-center gap-2 mb-2 px-1`}>
+                        <span className={`text-sm font-semibold ${tierConfig.color}`}>
+                          {tierConfig.label}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          ({tierMatchups.length} match{tierMatchups.length !== 1 ? "es" : ""})
+                        </span>
+                      </div>
+                      <div className="space-y-3">
+                        {tierMatchups.map((m) => (
                   <Card
                     key={m.matchNumber}
-                    className={m.opponent.isRedMatch ? "border-red-300" : ""}
+                    className={
+                      m.opponent.isRedMatch
+                        ? "border-red-300"
+                        : tier === "concede"
+                          ? "border-gray-200 opacity-75"
+                          : tier === "target"
+                            ? "border-emerald-200"
+                            : ""
+                    }
                   >
                     <CardContent className="py-4">
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
-                        {/* Match number */}
-                        <div className="flex items-center gap-2 lg:w-16 lg:shrink-0">
-                          <span
-                            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
-                              m.opponent.isRedMatch
-                                ? "bg-red-100 text-red-700"
-                                : "bg-emerald-100 text-emerald-700"
+                        {/* Match number + tier badge */}
+                        <div className="flex items-center gap-2 lg:w-20 lg:shrink-0 lg:flex-col lg:items-start">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+                                m.opponent.isRedMatch
+                                  ? "bg-red-100 text-red-700"
+                                  : tier === "concede"
+                                    ? "bg-gray-100 text-gray-500"
+                                    : "bg-emerald-100 text-emerald-700"
+                              }`}
+                            >
+                              {m.matchNumber}
+                            </span>
+                            {m.opponent.isRedMatch && (
+                              <Badge variant="destructive" className="text-[10px]">
+                                RED
+                              </Badge>
+                            )}
+                          </div>
+                          <Badge
+                            variant="secondary"
+                            className={`text-[10px] ${
+                              tier === "target"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : tier === "concede"
+                                  ? "bg-gray-100 text-gray-500"
+                                  : "bg-amber-100 text-amber-700"
                             }`}
                           >
-                            {m.matchNumber}
-                          </span>
-                          {m.opponent.isRedMatch && (
-                            <Badge variant="destructive" className="text-[10px]">
-                              RED
-                            </Badge>
-                          )}
+                            {m.effectiveSpread.toFixed(1)} spread
+                          </Badge>
                         </div>
 
                         {/* Matchup details */}
@@ -854,17 +916,15 @@ export function CounterClient({
                               </span>
                               <div
                                 className={`rounded-lg px-3 py-1 text-center text-xs font-bold ${
-                                  m.strokeAnalysis.bestVsBest > 1
+                                  m.effectiveSpread <= 2.0
                                     ? "bg-emerald-100 text-emerald-700"
-                                    : m.strokeAnalysis.bestVsBest < -1
+                                    : m.effectiveSpread > 4.0
                                       ? "bg-red-100 text-red-700"
-                                      : "bg-gray-100 text-gray-700"
+                                      : "bg-amber-100 text-amber-700"
                                 }`}
-                                title="Best vs Best / Second vs Second effective hcp gap"
+                                title={`Effective spread: ${m.effectiveSpread.toFixed(1)} (lower is better)`}
                               >
-                                {m.strokeAnalysis.bestVsBest > 0 ? "+" : ""}
-                                {m.strokeAnalysis.bestVsBest} / {m.strokeAnalysis.secondVsSecond > 0 ? "+" : ""}
-                                {m.strokeAnalysis.secondVsSecond}
+                                {m.effectiveSpread <= 1.5 ? "Excellent" : m.effectiveSpread <= 3.0 ? "Good" : m.effectiveSpread <= 5.0 ? "Marginal" : "Wide"}
                               </div>
                             </div>
 
@@ -901,10 +961,10 @@ export function CounterClient({
 
                           {/* Score breakdown */}
                           <div className="space-y-1">
-                            <ScoreBar label="Competitive" value={m.breakdown.strokeAdvantage} />
+                            <ScoreBar label="Competitive" value={m.breakdown.competitiveness} />
                             <ScoreBar label="Win Rate" value={m.breakdown.historicalWinRate} />
                             <ScoreBar label="Form" value={m.breakdown.recentForm} />
-                            <ScoreBar label="Venue" value={m.breakdown.venueAffinity} />
+                            <ScoreBar label="Band" value={m.breakdown.bandCoherence} />
                           </div>
 
                           {/* Reasoning */}
@@ -919,14 +979,20 @@ export function CounterClient({
 
                         {/* Overall score */}
                         <div className="lg:w-14 lg:shrink-0 lg:text-center">
-                          <Badge className="text-base">
+                          <Badge className={`text-base ${
+                            tier === "concede" ? "bg-gray-200 text-gray-600" : ""
+                          }`}>
                             {(m.score * 100).toFixed(0)}
                           </Badge>
                         </div>
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

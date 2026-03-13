@@ -374,34 +374,41 @@ export type StrokeAnalysis = {
   secondVsSecond: number;
 };
 
+export type MatchTier = "target" | "competitive" | "concede";
+
 export type CounterMatchup = {
   matchNumber: number;
   ourPlayer1: AvailablePlayer;
   ourPlayer2: AvailablePlayer;
   opponent: OpponentPair;
   score: number;
+  tier: MatchTier;
   breakdown: {
-    strokeAdvantage: number;
+    competitiveness: number;
     historicalWinRate: number;
     recentForm: number;
     venueAffinity: number;
+    bandCoherence: number;
   };
   strokeAnalysis: StrokeAnalysis;
+  effectiveSpread: number;
   reasoning: string[];
 };
 
 export type CounterPairingResult = {
   matchups: CounterMatchup[];
   totalNetStrokes: number;
-  avgCompetitiveness: number; // average of per-matchup competitiveness scores (0–1)
+  avgCompetitiveness: number;
   unpairedPlayers: AvailablePlayer[];
+  tierSummary: { target: number; competitive: number; concede: number };
 };
 
 const COUNTER_WEIGHTS = {
-  strokeAdvantage: 0.4,
+  competitiveness: 0.45,
   historicalWinRate: 0.25,
-  recentForm: 0.2,
-  venueAffinity: 0.15,
+  recentForm: 0.15,
+  venueAffinity: 0.10,
+  bandCoherence: 0.05,
 } as const;
 
 /**
@@ -473,22 +480,93 @@ function calculateStrokeAnalysis(
 }
 
 /**
- * Score stroke advantage based on effective handicap competitiveness.
- * In 4BBB, at least one player must compete per hole, so we weight:
- * - Best vs Best (60%): can our strongest player match theirs?
- * - Second vs Second (40%): is our second player also competitive?
- * Normalized to 0–1 where 0.5 = even, 1.0 = dominant, 0.0 = outclassed.
+ * Score competitiveness based on effective spread after stroke allocation.
+ * Lower effective spread = more competitive match = higher score.
+ * Also penalizes stroke deficits on our players.
+ *
+ * Scoring bands (based on match analysis — see PAIRING-ANALYSIS.md):
+ *   Spread 0–1.5: excellent (0.85–1.0)
+ *   Spread 1.5–3.0: good (0.55–0.85)
+ *   Spread 3.0–5.0: marginal (0.25–0.55)
+ *   Spread 5.0+: poor (0.0–0.25)
+ * Deficit penalty: −0.1 per stroke of deficit on our players.
  */
-function scoreStrokeAdvantage(analysis: StrokeAnalysis): number {
-  const composite =
-    analysis.bestVsBest * 0.6 + analysis.secondVsSecond * 0.4;
-  // ±10 window: a 10-stroke effective advantage is near-max
-  const normalized = (composite + 10) / 20;
-  return Math.max(0, Math.min(1, normalized));
+function scoreCompetitiveness(analysis: StrokeAnalysis): {
+  score: number;
+  effectiveSpread: number;
+} {
+  const allEff = [
+    analysis.ourPlayer1EffHcp,
+    analysis.ourPlayer2EffHcp,
+    analysis.opp1EffHcp,
+    analysis.opp2EffHcp,
+  ];
+  const effectiveSpread =
+    Math.round((Math.max(...allEff) - Math.min(...allEff)) * 10) / 10;
+
+  // Piecewise linear mapping: spread → base score
+  let base: number;
+  if (effectiveSpread <= 1.5) {
+    base = 1.0 - (effectiveSpread / 1.5) * 0.15; // 1.0 → 0.85
+  } else if (effectiveSpread <= 3.0) {
+    base = 0.85 - ((effectiveSpread - 1.5) / 1.5) * 0.3; // 0.85 → 0.55
+  } else if (effectiveSpread <= 5.0) {
+    base = 0.55 - ((effectiveSpread - 3.0) / 2.0) * 0.3; // 0.55 → 0.25
+  } else {
+    base = Math.max(0, 0.25 - ((effectiveSpread - 5.0) / 10.0) * 0.25); // 0.25 → 0
+  }
+
+  // Also factor in directional advantage: are OUR effective hcps lower (better)?
+  const ourBestEff = Math.min(
+    analysis.ourPlayer1EffHcp,
+    analysis.ourPlayer2EffHcp,
+  );
+  const oppBestEff = Math.min(analysis.opp1EffHcp, analysis.opp2EffHcp);
+  const ourSecondEff = Math.max(
+    analysis.ourPlayer1EffHcp,
+    analysis.ourPlayer2EffHcp,
+  );
+  const oppSecondEff = Math.max(analysis.opp1EffHcp, analysis.opp2EffHcp);
+  // Small bonus/penalty based on who has the edge (±0.1)
+  const dirAdv =
+    ((oppBestEff - ourBestEff) * 0.6 +
+      (oppSecondEff - ourSecondEff) * 0.4) /
+    10;
+  base += Math.max(-0.1, Math.min(0.1, dirAdv));
+
+  // Deficit penalty: subtract 0.1 per stroke of deficit on our players
+  const totalDeficit =
+    analysis.ourPlayer1Deficit + analysis.ourPlayer2Deficit;
+  base -= totalDeficit * 0.1;
+
+  return {
+    score: Math.max(0, Math.min(1, base)),
+    effectiveSpread,
+  };
+}
+
+/**
+ * Score band coherence — whether all 4 players are in a similar raw handicap range.
+ * When all 4 are within ~8 strokes, the match is naturally competitive.
+ */
+function scoreBandCoherence(
+  ourH1: number,
+  ourH2: number,
+  oppH1: number,
+  oppH2: number,
+): number {
+  const rawSpread = Math.max(ourH1, ourH2, oppH1, oppH2) - Math.min(ourH1, ourH2, oppH1, oppH2);
+  if (rawSpread <= 5) return 1.0;
+  if (rawSpread <= 8) return 0.7;
+  if (rawSpread <= 12) return 0.4;
+  if (rawSpread <= 16) return 0.2;
+  return 0.0;
 }
 
 function generateCounterReasoning(
   strokeAnalysis: StrokeAnalysis,
+  effectiveSpread: number,
+  tier: MatchTier,
   pairData: {
     played: number;
     wins: number;
@@ -505,7 +583,25 @@ function generateCounterReasoning(
 ): string[] {
   const reasons: string[] = [];
 
-  // Effective handicap position summary
+  // Tier indicator
+  if (tier === "concede") {
+    reasons.push("🏳 Concede — save strength elsewhere");
+  } else if (tier === "target") {
+    reasons.push("🎯 Target win");
+  }
+
+  // Effective spread summary
+  const spreadLabel =
+    effectiveSpread <= 1.5
+      ? "Excellent"
+      : effectiveSpread <= 3.0
+        ? "Good"
+        : effectiveSpread <= 5.0
+          ? "Marginal"
+          : "Wide";
+  reasons.push(`Spread ${effectiveSpread.toFixed(1)} (${spreadLabel})`);
+
+  // Effective handicap position
   const ourBest = Math.min(strokeAnalysis.ourPlayer1EffHcp, strokeAnalysis.ourPlayer2EffHcp);
   const ourSecond = Math.max(strokeAnalysis.ourPlayer1EffHcp, strokeAnalysis.ourPlayer2EffHcp);
   const oppBest = Math.min(strokeAnalysis.opp1EffHcp, strokeAnalysis.opp2EffHcp);
@@ -515,7 +611,6 @@ function generateCounterReasoning(
   // Deficit warnings
   const deficits: string[] = [];
   if (strokeAnalysis.ourPlayer1Deficit > 0) {
-    const name = strokeAnalysis.ourPlayer1EffHcp <= strokeAnalysis.ourPlayer2EffHcp ? p1Name : p1Name;
     deficits.push(`${p1Name} capped ${strokeAnalysis.ourPlayer1Deficit} short`);
   }
   if (strokeAnalysis.ourPlayer2Deficit > 0) {
@@ -557,10 +652,29 @@ function generateCounterReasoning(
   return reasons;
 }
 
+/** Threshold: if no pair can achieve effective spread below this, concede the match */
+const CONCEDE_THRESHOLD = 4.0;
+/** Matches with spread below this are target wins */
+const TARGET_THRESHOLD = 2.0;
+
+/**
+ * Determine match tier based on best achievable competitiveness.
+ */
+function classifyTier(effectiveSpread: number): MatchTier {
+  if (effectiveSpread <= TARGET_THRESHOLD) return "target";
+  if (effectiveSpread <= CONCEDE_THRESHOLD) return "competitive";
+  return "concede";
+}
+
 /**
  * Given opponent pairs (received lineup), suggest counter-pairings
- * from our available players. Processes red matches first, then
- * strongest opponent pairs, using greedy assignment.
+ * from our available players using a 2-phase concede-and-focus strategy.
+ *
+ * Phase 1: Score all (opponent, our_pair) combinations. Identify opponent pairs
+ *          where no available pair can achieve effective spread < CONCEDE_THRESHOLD.
+ *          Assign weakest available players to these unwinnable matches.
+ * Phase 2: Assign remaining players optimally to winnable matches, prioritizing
+ *          target wins (spread < 2.0) then competitive matches.
  */
 export function suggestCounterPairings(
   opponentPairs: OpponentPair[],
@@ -574,6 +688,7 @@ export function suggestCounterPairings(
       totalNetStrokes: 0,
       avgCompetitiveness: 0,
       unpairedPlayers: [...availablePlayers],
+      tierSummary: { target: 0, competitive: 0, concede: 0 },
     };
   }
 
@@ -592,121 +707,230 @@ export function suggestCounterPairings(
     pairingStatsMap.set(pairKey(ps.player1Id, ps.player2Id), ps);
   }
 
-  // Track original order, then sort for strategic processing
+  // Helper: score a specific pair against an opponent
+  const scorePairVsOpponent = (
+    p1: AvailablePlayer,
+    p2: AvailablePlayer,
+    opp: OpponentPair,
+  ) => {
+    const strokeAnalysis = calculateStrokeAnalysis(
+      p1.handicap,
+      p2.handicap,
+      opp.opp1Handicap,
+      opp.opp2Handicap,
+      opp.isRedMatch,
+    );
+    const { score: compScore, effectiveSpread } =
+      scoreCompetitiveness(strokeAnalysis);
+    const bandScore = scoreBandCoherence(
+      p1.handicap,
+      p2.handicap,
+      opp.opp1Handicap,
+      opp.opp2Handicap,
+    );
+
+    const key = pairKey(p1.id, p2.id);
+    const pairStat = pairingStatsMap.get(key);
+    const played = pairStat?.played ?? 0;
+    const wins = pairStat?.wins ?? 0;
+    const halved = pairStat?.halved ?? 0;
+    const losses = pairStat?.losses ?? 0;
+    const { score: winRateScore, isUntested } = scoreHistoricalWinRate(
+      wins + halved * 0.5,
+      played,
+    );
+
+    const formResult = scoreRecentForm(historicalMatches, p1.id, p2.id);
+
+    const pairMatches = historicalMatches.filter(
+      (m) =>
+        (m.player1Id === p1.id && m.player2Id === p2.id) ||
+        (m.player1Id === p2.id && m.player2Id === p1.id),
+    );
+    const venueResult = scoreVenueAffinity(
+      pairMatches,
+      historicalMatches,
+      p1.id,
+      p2.id,
+      venueName,
+    );
+
+    const breakdown = {
+      competitiveness: Math.round(compScore * 1000) / 1000,
+      historicalWinRate: Math.round(winRateScore * 1000) / 1000,
+      recentForm: Math.round(formResult.score * 1000) / 1000,
+      venueAffinity: Math.round(venueResult.score * 1000) / 1000,
+      bandCoherence: Math.round(bandScore * 1000) / 1000,
+    };
+
+    const totalScore =
+      breakdown.competitiveness * COUNTER_WEIGHTS.competitiveness +
+      breakdown.historicalWinRate * COUNTER_WEIGHTS.historicalWinRate +
+      breakdown.recentForm * COUNTER_WEIGHTS.recentForm +
+      breakdown.venueAffinity * COUNTER_WEIGHTS.venueAffinity +
+      breakdown.bandCoherence * COUNTER_WEIGHTS.bandCoherence;
+
+    const tier = classifyTier(effectiveSpread);
+
+    return {
+      totalScore,
+      breakdown,
+      strokeAnalysis,
+      effectiveSpread,
+      tier,
+      pairData: { played, wins, losses, halved, isUntested },
+      formResult,
+      venueResult,
+    };
+  };
+
+  // Index opponent pairs with original order
   const indexed = opponentPairs.map((opp, i) => ({
     ...opp,
     originalIndex: i,
   }));
-  // Red matches first (limited strokes need careful matching), then strongest opponents
-  const processingOrder = [...indexed].sort((a, b) => {
+
+  // Phase 1: Find the BEST possible effective spread for each opponent pair
+  // to determine which are concession matches
+  const bestSpreadPerOpp = new Map<number, number>();
+  for (const opp of indexed) {
+    let bestSpread = Infinity;
+    for (let i = 0; i < availablePlayers.length; i++) {
+      for (let j = i + 1; j < availablePlayers.length; j++) {
+        const sa = calculateStrokeAnalysis(
+          availablePlayers[i].handicap,
+          availablePlayers[j].handicap,
+          opp.opp1Handicap,
+          opp.opp2Handicap,
+          opp.isRedMatch,
+        );
+        const allEff = [sa.ourPlayer1EffHcp, sa.ourPlayer2EffHcp, sa.opp1EffHcp, sa.opp2EffHcp];
+        const spread = Math.max(...allEff) - Math.min(...allEff);
+        if (spread < bestSpread) bestSpread = spread;
+      }
+    }
+    bestSpreadPerOpp.set(opp.originalIndex, bestSpread);
+  }
+
+  // Separate into concession and competitive opponent pairs
+  const concessionOpps = indexed.filter(
+    (opp) => (bestSpreadPerOpp.get(opp.originalIndex) ?? Infinity) > CONCEDE_THRESHOLD,
+  );
+  const competitiveOpps = indexed.filter(
+    (opp) => (bestSpreadPerOpp.get(opp.originalIndex) ?? Infinity) <= CONCEDE_THRESHOLD,
+  );
+
+  // Sort competitive: red matches first, then by their combined handicap (strongest first)
+  competitiveOpps.sort((a, b) => {
     if (a.isRedMatch && !b.isRedMatch) return -1;
     if (!a.isRedMatch && b.isRedMatch) return 1;
-    return (
-      a.opp1Handicap + a.opp2Handicap - (b.opp1Handicap + b.opp2Handicap)
-    );
+    return a.opp1Handicap + a.opp2Handicap - (b.opp1Handicap + b.opp2Handicap);
   });
+
+  // Sort concession by combined handicap (strongest first — assign weakest players to strongest opps)
+  concessionOpps.sort(
+    (a, b) => a.opp1Handicap + a.opp2Handicap - (b.opp1Handicap + b.opp2Handicap),
+  );
 
   const usedPlayerIds = new Set<number>();
   const matchups: CounterMatchup[] = [];
 
-  for (const opp of processingOrder) {
+  // Phase 2a: Assign best pairs to competitive matches
+  for (const opp of competitiveOpps) {
     const remaining = availablePlayers.filter(
       (p) => !usedPlayerIds.has(p.id),
     );
     if (remaining.length < 2) break;
 
     let bestScore = -1;
+    let bestResult: ReturnType<typeof scorePairVsOpponent> | null = null;
     let bestPair: [AvailablePlayer, AvailablePlayer] | null = null;
-    let bestBreakdown: CounterMatchup["breakdown"] | null = null;
-    let bestStroke: StrokeAnalysis | null = null;
-    let bestReasoning: string[] = [];
 
     for (let i = 0; i < remaining.length; i++) {
       for (let j = i + 1; j < remaining.length; j++) {
-        const p1 = remaining[i];
-        const p2 = remaining[j];
-
-        const strokeAnalysis = calculateStrokeAnalysis(
-          p1.handicap,
-          p2.handicap,
-          opp.opp1Handicap,
-          opp.opp2Handicap,
-          opp.isRedMatch,
-        );
-        const strokeScore = scoreStrokeAdvantage(strokeAnalysis);
-
-        const key = pairKey(p1.id, p2.id);
-        const pairStat = pairingStatsMap.get(key);
-        const played = pairStat?.played ?? 0;
-        const wins = pairStat?.wins ?? 0;
-        const halved = pairStat?.halved ?? 0;
-        const losses = pairStat?.losses ?? 0;
-        const { score: winRateScore, isUntested } = scoreHistoricalWinRate(
-          wins + halved * 0.5,
-          played,
-        );
-
-        const formResult = scoreRecentForm(historicalMatches, p1.id, p2.id);
-
-        const pairMatches = historicalMatches.filter(
-          (m) =>
-            (m.player1Id === p1.id && m.player2Id === p2.id) ||
-            (m.player1Id === p2.id && m.player2Id === p1.id),
-        );
-        const venueResult = scoreVenueAffinity(
-          pairMatches,
-          historicalMatches,
-          p1.id,
-          p2.id,
-          venueName,
-        );
-
-        const breakdown = {
-          strokeAdvantage: Math.round(strokeScore * 1000) / 1000,
-          historicalWinRate: Math.round(winRateScore * 1000) / 1000,
-          recentForm: Math.round(formResult.score * 1000) / 1000,
-          venueAffinity: Math.round(venueResult.score * 1000) / 1000,
-        };
-
-        const totalScore =
-          breakdown.strokeAdvantage * COUNTER_WEIGHTS.strokeAdvantage +
-          breakdown.historicalWinRate * COUNTER_WEIGHTS.historicalWinRate +
-          breakdown.recentForm * COUNTER_WEIGHTS.recentForm +
-          breakdown.venueAffinity * COUNTER_WEIGHTS.venueAffinity;
-
-        if (totalScore > bestScore) {
-          bestScore = totalScore;
-          bestPair = [p1, p2];
-          bestBreakdown = breakdown;
-          bestStroke = strokeAnalysis;
-          bestReasoning = generateCounterReasoning(
-            strokeAnalysis,
-            { played, wins, losses, halved, isUntested },
-            formResult,
-            venueResult,
-            opp.isRedMatch,
-            venueName,
-            p1.name,
-            p2.name,
-          );
+        const result = scorePairVsOpponent(remaining[i], remaining[j], opp);
+        if (result.totalScore > bestScore) {
+          bestScore = result.totalScore;
+          bestResult = result;
+          bestPair = [remaining[i], remaining[j]];
         }
       }
     }
 
-    if (bestPair && bestBreakdown && bestStroke) {
+    if (bestPair && bestResult) {
       usedPlayerIds.add(bestPair[0].id);
       usedPlayerIds.add(bestPair[1].id);
+      const reasoning = generateCounterReasoning(
+        bestResult.strokeAnalysis,
+        bestResult.effectiveSpread,
+        bestResult.tier,
+        bestResult.pairData,
+        bestResult.formResult,
+        bestResult.venueResult,
+        opp.isRedMatch,
+        venueName,
+        bestPair[0].name,
+        bestPair[1].name,
+      );
       matchups.push({
         matchNumber: opp.originalIndex + 1,
         ourPlayer1: bestPair[0],
         ourPlayer2: bestPair[1],
         opponent: opp,
         score: Math.round(bestScore * 1000) / 1000,
-        breakdown: bestBreakdown,
-        strokeAnalysis: bestStroke,
-        reasoning: bestReasoning,
+        tier: bestResult.tier,
+        breakdown: bestResult.breakdown,
+        strokeAnalysis: bestResult.strokeAnalysis,
+        effectiveSpread: bestResult.effectiveSpread,
+        reasoning,
       });
     }
+  }
+
+  // Phase 2b: Assign weakest remaining players to concession matches
+  for (const opp of concessionOpps) {
+    const remaining = availablePlayers.filter(
+      (p) => !usedPlayerIds.has(p.id),
+    );
+    if (remaining.length < 2) break;
+
+    // For concession: pick the two HIGHEST handicap (weakest) remaining players
+    // to preserve stronger players for competitive matches (already assigned above)
+    const sortedByHcp = [...remaining].sort(
+      (a, b) => b.handicap - a.handicap,
+    );
+    const p1 = sortedByHcp[0];
+    const p2 = sortedByHcp[1];
+
+    const result = scorePairVsOpponent(p1, p2, opp);
+    usedPlayerIds.add(p1.id);
+    usedPlayerIds.add(p2.id);
+
+    const reasoning = generateCounterReasoning(
+      result.strokeAnalysis,
+      result.effectiveSpread,
+      "concede" as MatchTier,
+      result.pairData,
+      result.formResult,
+      result.venueResult,
+      opp.isRedMatch,
+      venueName,
+      p1.name,
+      p2.name,
+    );
+
+    matchups.push({
+      matchNumber: opp.originalIndex + 1,
+      ourPlayer1: p1,
+      ourPlayer2: p2,
+      opponent: opp,
+      score: Math.round(result.totalScore * 1000) / 1000,
+      tier: "concede",
+      breakdown: result.breakdown,
+      strokeAnalysis: result.strokeAnalysis,
+      effectiveSpread: result.effectiveSpread,
+      reasoning,
+    });
   }
 
   // Re-sort by original match order for display
@@ -718,12 +942,18 @@ export function suggestCounterPairings(
   );
   const avgCompetitiveness =
     matchups.length > 0
-      ? matchups.reduce((sum, m) => sum + m.breakdown.strokeAdvantage, 0) /
+      ? matchups.reduce((sum, m) => sum + m.breakdown.competitiveness, 0) /
         matchups.length
       : 0;
   const unpairedPlayers = availablePlayers.filter(
     (p) => !usedPlayerIds.has(p.id),
   );
 
-  return { matchups, totalNetStrokes, avgCompetitiveness, unpairedPlayers };
+  const tierSummary = {
+    target: matchups.filter((m) => m.tier === "target").length,
+    competitive: matchups.filter((m) => m.tier === "competitive").length,
+    concede: matchups.filter((m) => m.tier === "concede").length,
+  };
+
+  return { matchups, totalNetStrokes, avgCompetitiveness, unpairedPlayers, tierSummary };
 }
