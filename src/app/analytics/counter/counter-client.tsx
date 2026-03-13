@@ -356,7 +356,11 @@ export function CounterClient({
                 }}
               >
                 <SelectTrigger className="h-8 w-52">
-                  <SelectValue placeholder="Select club" />
+                  <SelectValue placeholder="Select club">
+                    {selectedClubId
+                      ? clubs.find((c) => c.id === selectedClubId)?.name ?? "Select club"
+                      : "Select club"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">No club</SelectItem>
