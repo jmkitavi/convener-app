@@ -215,12 +215,6 @@ export function PlayerDetailClient({
                   {player.defaultHandicap}
                 </p>
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Member Since</p>
-                <p className="text-sm">
-                  {new Date(player.createdAt).toLocaleDateString()}
-                </p>
-              </div>
             </div>
             <Separator />
             <div className="space-y-3">

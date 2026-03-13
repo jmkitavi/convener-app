@@ -58,14 +58,16 @@ export default async function DashboardPage() {
   const recentFixtures = getRecentFixtureResults(allMatches, 5);
 
   // Player appearance counts and win rates (includes opponent-side for internal matches)
-  const playerMap = new Map<number, { name: string; played: number; wins: number }>();
+  // Halved matches count as 0.5 points
+  const playerMap = new Map<number, { name: string; played: number; wins: number; halved: number }>();
   for (const m of allMatches) {
     // Team side players
     for (const pid of [m.player1Id, m.player2Id]) {
       const name = pid === m.player1Id ? m.player1Name : m.player2Name;
-      const entry = playerMap.get(pid) ?? { name, played: 0, wins: 0 };
+      const entry = playerMap.get(pid) ?? { name, played: 0, wins: 0, halved: 0 };
       entry.played++;
       if (m.result === "win") entry.wins++;
+      else if (m.result === "halved") entry.halved++;
       playerMap.set(pid, entry);
     }
     // Opponent-side players in internal matches
@@ -74,16 +76,16 @@ export default async function DashboardPage() {
       const name = pid === m.opponent1Id
         ? (m.opponent1PlayerName ?? m.opponent1Name)
         : (m.opponent2PlayerName ?? m.opponent2Name);
-      const entry = playerMap.get(pid) ?? { name, played: 0, wins: 0 };
+      const entry = playerMap.get(pid) ?? { name, played: 0, wins: 0, halved: 0 };
       entry.played++;
       if (m.result === "loss") entry.wins++; // flipped
-      else if (m.result === "halved") { /* no win credit */ }
+      else if (m.result === "halved") entry.halved++;
       playerMap.set(pid, entry);
     }
   }
 
   const playerStats = Array.from(playerMap.entries())
-    .map(([id, s]) => ({ id, ...s, winRate: s.played > 0 ? s.wins / s.played : 0 }));
+    .map(([id, s]) => ({ id, ...s, winRate: s.played > 0 ? (s.wins + s.halved * 0.5) / s.played : 0 }));
 
   const mostPlayed = [...playerStats].sort((a, b) => b.played - a.played).slice(0, 3);
   const topWinRate = [...playerStats]
@@ -253,7 +255,7 @@ export default async function DashboardPage() {
           <CardHeader>
             <CardTitle>Best Win Rate</CardTitle>
             <CardDescription>
-              Players with the highest win rate (min. 3 matches)
+              Players with the highest win rate (W=1, H=½, min. 3 matches)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -275,7 +277,7 @@ export default async function DashboardPage() {
                     <span className="text-sm font-medium">{p.name}</span>
                   </div>
                   <span className="text-sm tabular-nums text-muted-foreground">
-                    {(p.winRate * 100).toFixed(0)}% ({p.wins}/{p.played})
+                    {(p.winRate * 100).toFixed(0)}% ({p.wins}W {p.halved}H {p.played - p.wins - p.halved}L)
                   </span>
                 </Link>
               ))

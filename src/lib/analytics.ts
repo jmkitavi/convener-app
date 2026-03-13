@@ -38,6 +38,7 @@ export type PartnerRecord = {
   partnerName: string;
   played: number;
   wins: number;
+  halved: number;
   winRate: number;
 };
 
@@ -152,7 +153,7 @@ export function getTeamRecord(matches: MatchWithDetails[]): TeamRecord {
   const losses = matches.filter((m) => m.result === "loss").length;
   const halved = matches.filter((m) => m.result === "halved").length;
   const total = matches.length;
-  return { wins, losses, halved, total, winRate: calcWinRate(wins, total) };
+  return { wins, losses, halved, total, winRate: calcWinRate(wins + halved * 0.5, total) };
 }
 
 export function getPlayerStats(
@@ -167,7 +168,7 @@ export function getPlayerStats(
 
   const partnerMap = new Map<
     number,
-    { partnerName: string; played: number; wins: number }
+    { partnerName: string; played: number; wins: number; halved: number }
   >();
 
   for (const m of playerMatches) {
@@ -192,9 +193,12 @@ export function getPlayerStats(
       partnerName,
       played: 0,
       wins: 0,
+      halved: 0,
     };
     entry.played++;
-    if (effectiveResult(m, playerId) === "win") entry.wins++;
+    const res = effectiveResult(m, playerId);
+    if (res === "win") entry.wins++;
+    else if (res === "halved") entry.halved++;
     partnerMap.set(partnerId, entry);
   }
 
@@ -204,7 +208,8 @@ export function getPlayerStats(
       partnerName: data.partnerName,
       played: data.played,
       wins: data.wins,
-      winRate: calcWinRate(data.wins, data.played),
+      halved: data.halved,
+      winRate: calcWinRate(data.wins + data.halved * 0.5, data.played),
     }))
     .sort((a, b) => b.winRate - a.winRate || b.played - a.played);
 
@@ -213,7 +218,7 @@ export function getPlayerStats(
     wins,
     losses,
     halved,
-    winRate: calcWinRate(wins, playerMatches.length),
+    winRate: calcWinRate(wins + halved * 0.5, playerMatches.length),
     partners,
   };
 }
@@ -290,7 +295,7 @@ export function getPairingStats(matches: MatchWithDetails[]): PairingRecord[] {
       wins: p.wins,
       losses: p.losses,
       halved: p.halved,
-      winRate: calcWinRate(p.wins, p.played),
+      winRate: calcWinRate(p.wins + p.halved * 0.5, p.played),
       avgCombinedHandicap:
         Math.round((p.totalCombinedHandicap / p.played) * 10) / 10,
     }))
@@ -329,7 +334,7 @@ export function getVenueStats(matches: MatchWithDetails[]): VenueRecord[] {
       wins: v.wins,
       losses: v.losses,
       halved: v.halved,
-      winRate: calcWinRate(v.wins, v.played),
+      winRate: calcWinRate(v.wins + v.halved * 0.5, v.played),
     }))
     .sort((a, b) => b.played - a.played);
 }
@@ -362,7 +367,7 @@ export function getPlayerVenueStats(
       wins: v.wins,
       losses: v.losses,
       halved: v.halved,
-      winRate: calcWinRate(v.wins, v.played),
+      winRate: calcWinRate(v.wins + v.halved * 0.5, v.played),
     }))
     .sort((a, b) => b.played - a.played);
 }
@@ -407,7 +412,7 @@ export function getHandicapMatchupStats(
   }
 
   for (const b of buckets) {
-    b.winRate = calcWinRate(b.wins, b.played);
+    b.winRate = calcWinRate(b.wins + b.halved * 0.5, b.played);
   }
 
   return buckets;
@@ -433,6 +438,7 @@ export function getPlayerForm(
     const result = effectiveResult(m, playerId);
     totalPlayed++;
     if (result === "win") totalWins++;
+    else if (result === "halved") totalWins += 0.5;
 
     const onOppSide = isOnOpponentSide(m, playerId);
     let partnerId: number;

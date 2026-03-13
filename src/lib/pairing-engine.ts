@@ -101,8 +101,10 @@ function scoreVenueAffinity(
   const pairVenueMatches = pairMatches.filter((m) => m.venueName === venueName);
   if (pairVenueMatches.length >= 2) {
     const wins = pairVenueMatches.filter((m) => m.result === "win").length;
+    const halved = pairVenueMatches.filter((m) => m.result === "halved").length;
+    const points = wins + halved * 0.5;
     return {
-      score: wins / pairVenueMatches.length,
+      score: points / pairVenueMatches.length,
       venueWins: wins,
       venuePlayed: pairVenueMatches.length,
     };
@@ -123,8 +125,10 @@ function scoreVenueAffinity(
   }
 
   const wins = playerVenueMatches.filter((m) => m.result === "win").length;
+  const halved = playerVenueMatches.filter((m) => m.result === "halved").length;
+  const points = wins + halved * 0.5;
   // Discount individual data slightly since it's not pair-specific
-  const rawRate = wins / playerVenueMatches.length;
+  const rawRate = points / playerVenueMatches.length;
   return {
     score: 0.3 + rawRate * 0.5,
     venueWins: wins,
@@ -189,7 +193,7 @@ function generateReasoning(
       pairData.halved,
     );
     reasons.push(`${record} record together (${pairData.played} matches)`);
-    if (pairData.played >= 3 && pairData.wins / pairData.played >= 0.7) {
+    if (pairData.played >= 3 && (pairData.wins + pairData.halved * 0.5) / pairData.played >= 0.7) {
       reasons.push("Proven winning combination");
     }
   }
@@ -275,9 +279,10 @@ export function suggestPairings(
           (m.player1Id === p2.id && m.player2Id === p1.id),
       );
 
-      // Score each factor
+      // Score each factor (halved = 0.5 points)
+      const points = wins + halved * 0.5;
       const { score: winRateScore, isUntested } = scoreHistoricalWinRate(
-        wins,
+        points,
         played,
       );
       const confidenceScore = scoreSampleConfidence(played);
@@ -326,7 +331,7 @@ export function suggestPairings(
         breakdown,
         reasoning,
         matchesPlayed: played,
-        winRate: played > 0 ? Math.round((wins / played) * 1000) / 1000 : 0,
+        winRate: played > 0 ? Math.round(((wins + halved * 0.5) / played) * 1000) / 1000 : 0,
       });
     }
   }
