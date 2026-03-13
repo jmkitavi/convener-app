@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Shield,
@@ -9,12 +10,12 @@ import {
   Plus,
   Trash2,
   AlertTriangle,
+  Save,
+  FolderOpen,
+  BarChart3,
 } from "lucide-react";
 import {
   Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   CardContent,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
+import { Collapsible } from "@/components/collapsible";
 import {
   suggestCounterPairings,
   type AvailablePlayer,
@@ -35,6 +37,7 @@ import {
   type CounterPairingResult,
 } from "@/lib/pairing-engine";
 import type { MatchWithDetails } from "@/lib/analytics";
+import { saveLineup, getLineup, deleteLineup } from "@/lib/actions";
 
 type Player = {
   id: number;
@@ -52,6 +55,14 @@ type Club = {
   par: number | null;
   slopeRating: number | null;
   courseRating: number | null;
+};
+
+type SavedLineup = {
+  id: number;
+  name: string;
+  fixtureId: number | null;
+  createdAt: string;
+  pairCount: number;
 };
 
 type OpponentRow = {
@@ -90,17 +101,43 @@ export function CounterClient({
   players,
   clubs,
   allMatches,
+  savedLineups: initialLineups,
 }: {
   players: Player[];
   clubs: Club[];
   allMatches: MatchWithDetails[];
+  savedLineups: SavedLineup[];
 }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+
   const [opponentRows, setOpponentRows] = useState<OpponentRow[]>(
     Array.from({ length: 15 }, () => ({ ...EMPTY_ROW })),
   );
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [playerSort, setPlayerSort] = useState<"name" | "handicap">("name");
   const [venueName, setVenueName] = useState<string | undefined>(undefined);
   const [result, setResult] = useState<CounterPairingResult | null>(null);
+
+  // Collapsible state
+  const [lineupOpen, setLineupOpen] = useState(true);
+  const [playersOpen, setPlayersOpen] = useState(true);
+  const [resultsOpen, setResultsOpen] = useState(true);
+
+  // Save/load state
+  const [savedLineups, setSavedLineups] = useState(initialLineups);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [loadDialogOpen, setLoadDialogOpen] = useState(false);
+
+  // Sorted players
+  const sortedPlayers = useMemo(() => {
+    const copy = [...players];
+    if (playerSort === "handicap") {
+      copy.sort((a, b) => a.defaultHandicap - b.defaultHandicap);
+    }
+    return copy;
+  }, [players, playerSort]);
 
   function updateRow(index: number, field: keyof OpponentRow, value: string | boolean) {
     setOpponentRows((prev) => {
@@ -141,7 +178,6 @@ export function CounterClient({
     setResult(null);
   }
 
-  // Validate and convert rows to OpponentPair[]
   function getValidOpponentPairs(): OpponentPair[] {
     return opponentRows
       .filter(
@@ -158,9 +194,7 @@ export function CounterClient({
         opp2Handicap: parseFloat(r.opp2Handicap),
         isRedMatch: r.isRedMatch,
       }))
-      .filter(
-        (p) => !isNaN(p.opp1Handicap) && !isNaN(p.opp2Handicap),
-      );
+      .filter((p) => !isNaN(p.opp1Handicap) && !isNaN(p.opp2Handicap));
   }
 
   function handleGenerate() {
@@ -169,13 +203,66 @@ export function CounterClient({
       .filter((p) => selectedIds.has(p.id))
       .map((p) => ({ id: p.id, name: p.name, handicap: p.defaultHandicap }));
 
-    const res = suggestCounterPairings(
-      opponentPairs,
-      available,
-      allMatches,
-      venueName,
-    );
+    const res = suggestCounterPairings(opponentPairs, available, allMatches, venueName);
     setResult(res);
+    setLineupOpen(false);
+    setPlayersOpen(false);
+    setResultsOpen(true);
+  }
+
+  // Save lineup
+  async function handleSave() {
+    if (!saveName.trim()) return;
+    const pairs = getValidOpponentPairs();
+    if (pairs.length === 0) return;
+
+    startTransition(async () => {
+      const res = await saveLineup({
+        name: saveName.trim(),
+        pairs: pairs.map((p, i) => ({ ...p, matchOrder: i + 1 })),
+      });
+      if (res.success) {
+        setSaveDialogOpen(false);
+        setSaveName("");
+        router.refresh();
+        // Optimistic update
+        setSavedLineups((prev) => [
+          { id: res.data!.id, name: saveName.trim(), fixtureId: null, createdAt: new Date().toISOString(), pairCount: pairs.length },
+          ...prev,
+        ]);
+      }
+    });
+  }
+
+  // Load lineup
+  async function handleLoad(id: number) {
+    startTransition(async () => {
+      const res = await getLineup(id);
+      if (res.success && res.data) {
+        const rows: OpponentRow[] = res.data.pairs.map((p) => ({
+          opp1Name: p.opp1Name,
+          opp1Handicap: String(p.opp1Handicap),
+          opp2Name: p.opp2Name,
+          opp2Handicap: String(p.opp2Handicap),
+          isRedMatch: p.isRedMatch,
+        }));
+        setOpponentRows(rows);
+        setLoadDialogOpen(false);
+        setResult(null);
+        setLineupOpen(true);
+      }
+    });
+  }
+
+  // Delete lineup
+  async function handleDelete(id: number) {
+    startTransition(async () => {
+      const res = await deleteLineup(id);
+      if (res.success) {
+        setSavedLineups((prev) => prev.filter((l) => l.id !== id));
+        router.refresh();
+      }
+    });
   }
 
   const validPairs = getValidOpponentPairs();
@@ -183,8 +270,38 @@ export function CounterClient({
   const selectedCount = selectedIds.size;
   const canGenerate = validPairs.length > 0 && selectedCount >= 2;
 
+  // Opponent analysis (computed from valid pairs)
+  const opponentAnalysis = useMemo(() => {
+    if (validPairs.length === 0) return null;
+    const allHcps = validPairs.flatMap((p) => [p.opp1Handicap, p.opp2Handicap]);
+    const combinedHcps = validPairs.map((p) => p.opp1Handicap + p.opp2Handicap);
+    const minCombined = Math.min(...combinedHcps);
+    const maxCombined = Math.max(...combinedHcps);
+    const avgCombined = combinedHcps.reduce((s, h) => s + h, 0) / combinedHcps.length;
+    const strongestIdx = combinedHcps.indexOf(minCombined);
+    const weakestIdx = combinedHcps.indexOf(maxCombined);
+
+    const redPairs = validPairs.filter((p) => p.isRedMatch);
+    const redCombinedHcps = redPairs.map((p) => p.opp1Handicap + p.opp2Handicap);
+
+    return {
+      totalPairs: validPairs.length,
+      redCount,
+      avgCombinedHcp: avgCombined,
+      minHcp: Math.min(...allHcps),
+      maxHcp: Math.max(...allHcps),
+      strongestPair: validPairs[strongestIdx],
+      strongestCombined: minCombined,
+      weakestPair: validPairs[weakestIdx],
+      weakestCombined: maxCombined,
+      redAvgCombined: redCombinedHcps.length > 0
+        ? redCombinedHcps.reduce((s, h) => s + h, 0) / redCombinedHcps.length
+        : 0,
+    };
+  }, [validPairs, redCount]);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Link
@@ -193,7 +310,7 @@ export function CounterClient({
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight">
             Counter-Pairing (Away Match)
           </h1>
@@ -203,123 +320,252 @@ export function CounterClient({
         </div>
       </div>
 
-      {/* Opponent Lineup Entry */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Opponent Lineup</CardTitle>
-              <CardDescription>
-                {validPairs.length} valid pair{validPairs.length !== 1 ? "s" : ""} entered
-                {redCount > 0 && ` • ${redCount} red match${redCount !== 1 ? "es" : ""}`}
-              </CardDescription>
-            </div>
+      {/* Opponent Lineup */}
+      <Collapsible
+        title="Opponent Lineup"
+        badge={validPairs.length > 0 ? `${validPairs.length} pairs` : undefined}
+        open={lineupOpen}
+        onOpenChange={setLineupOpen}
+      >
+        <div className="space-y-3">
+          {/* Save/Load toolbar */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setSaveDialogOpen(true); setSaveName(""); }}
+              disabled={validPairs.length === 0}
+            >
+              <Save className="mr-1 h-3 w-3" />
+              Save Lineup
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLoadDialogOpen(!loadDialogOpen)}
+            >
+              <FolderOpen className="mr-1 h-3 w-3" />
+              Load Lineup
+              {savedLineups.length > 0 && (
+                <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px]">{savedLineups.length}</span>
+              )}
+            </Button>
+            <div className="flex-1" />
             <Button variant="outline" size="sm" onClick={addRow}>
               <Plus className="mr-1 h-3 w-3" />
               Add Match
             </Button>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {/* Column headers */}
-            <div className="hidden lg:grid lg:grid-cols-[2rem_1fr_4rem_1fr_4rem_4rem_2rem] lg:gap-2 lg:px-1 text-xs font-medium text-muted-foreground">
-              <span>#</span>
-              <span>Opponent 1</span>
-              <span>Hcp</span>
-              <span>Opponent 2</span>
-              <span>Hcp</span>
-              <span>Red</span>
-              <span />
+
+          {/* Save dialog inline */}
+          {saveDialogOpen && (
+            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <Input
+                placeholder="Lineup name (e.g., Thika SC - Mar 2026)"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                className="h-8 flex-1"
+                onKeyDown={(e) => e.key === "Enter" && handleSave()}
+              />
+              <Button size="sm" onClick={handleSave} disabled={!saveName.trim() || isPending}>
+                Save
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSaveDialogOpen(false)}>
+                Cancel
+              </Button>
             </div>
+          )}
 
-            {opponentRows.map((row, i) => (
-              <div
-                key={i}
-                className={`rounded-lg border p-2 ${row.isRedMatch ? "border-red-300 bg-red-50" : ""}`}
-              >
-                <div className="grid grid-cols-[2rem_1fr_4rem] gap-2 lg:grid-cols-[2rem_1fr_4rem_1fr_4rem_4rem_2rem] lg:gap-2 items-center">
-                  {/* Match number */}
-                  <span className="text-xs font-medium text-muted-foreground text-center">
-                    {i + 1}
-                  </span>
+          {/* Load dropdown */}
+          {loadDialogOpen && (
+            <div className="rounded-lg border p-3 space-y-2">
+              {savedLineups.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No saved lineups yet.</p>
+              ) : (
+                savedLineups.map((l) => (
+                  <div key={l.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => handleLoad(l.id)}
+                      className="flex-1 text-left text-sm"
+                      disabled={isPending}
+                    >
+                      <span className="font-medium">{l.name}</span>
+                      <span className="ml-2 text-muted-foreground">
+                        {l.pairCount} pairs • {new Date(l.createdAt).toLocaleDateString()}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(l.id)}
+                      className="ml-2 rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-500"
+                      disabled={isPending}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
 
-                  {/* Opp1 Name */}
-                  <Input
-                    placeholder="Player 1 name"
-                    value={row.opp1Name}
-                    onChange={(e) => updateRow(i, "opp1Name", e.target.value)}
-                    className="h-8 text-sm"
-                  />
-
-                  {/* Opp1 Hcp */}
-                  <Input
-                    type="number"
-                    placeholder="Hcp"
-                    value={row.opp1Handicap}
-                    onChange={(e) => updateRow(i, "opp1Handicap", e.target.value)}
-                    className="h-8 text-sm"
-                  />
-
-                  {/* Opp2 Name - on new line on mobile */}
-                  <Input
-                    placeholder="Player 2 name"
-                    value={row.opp2Name}
-                    onChange={(e) => updateRow(i, "opp2Name", e.target.value)}
-                    className="h-8 text-sm col-span-2 lg:col-span-1 col-start-2"
-                  />
-
-                  {/* Opp2 Hcp */}
-                  <Input
-                    type="number"
-                    placeholder="Hcp"
-                    value={row.opp2Handicap}
-                    onChange={(e) => updateRow(i, "opp2Handicap", e.target.value)}
-                    className="h-8 text-sm col-start-3 lg:col-start-auto"
-                  />
-
-                  {/* Red match toggle */}
-                  <button
-                    type="button"
-                    onClick={() => updateRow(i, "isRedMatch", !row.isRedMatch)}
-                    className={`flex h-8 items-center justify-center rounded border text-xs font-medium transition-colors ${
-                      row.isRedMatch
-                        ? "border-red-400 bg-red-500 text-white"
-                        : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
-                    title={row.isRedMatch ? "Red match (max 4 strokes)" : "Regular match (max 8 strokes)"}
-                  >
-                    {row.isRedMatch ? "RED" : "Reg"}
-                  </button>
-
-                  {/* Remove */}
-                  <button
-                    type="button"
-                    onClick={() => removeRow(i)}
-                    className="flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-red-50 hover:text-red-500"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
+          {/* Column headers */}
+          <div className="hidden lg:grid lg:grid-cols-[2rem_1fr_4rem_1fr_4rem_4rem_2rem] lg:gap-2 lg:px-1 text-xs font-medium text-muted-foreground">
+            <span>#</span>
+            <span>Opponent 1</span>
+            <span>Hcp</span>
+            <span>Opponent 2</span>
+            <span>Hcp</span>
+            <span>Red</span>
+            <span />
           </div>
-        </CardContent>
-      </Card>
+
+          {opponentRows.map((row, i) => (
+            <div
+              key={i}
+              className={`rounded-lg border p-2 ${row.isRedMatch ? "border-red-300 bg-red-50" : ""}`}
+            >
+              <div className="grid grid-cols-[2rem_1fr_4rem] gap-2 lg:grid-cols-[2rem_1fr_4rem_1fr_4rem_4rem_2rem] lg:gap-2 items-center">
+                <span className="text-xs font-medium text-muted-foreground text-center">
+                  {i + 1}
+                </span>
+                <Input
+                  placeholder="Player 1 name"
+                  value={row.opp1Name}
+                  onChange={(e) => updateRow(i, "opp1Name", e.target.value)}
+                  className="h-8 text-sm"
+                />
+                <Input
+                  type="number"
+                  placeholder="Hcp"
+                  value={row.opp1Handicap}
+                  onChange={(e) => updateRow(i, "opp1Handicap", e.target.value)}
+                  className="h-8 text-sm"
+                />
+                <Input
+                  placeholder="Player 2 name"
+                  value={row.opp2Name}
+                  onChange={(e) => updateRow(i, "opp2Name", e.target.value)}
+                  className="h-8 text-sm col-span-2 lg:col-span-1 col-start-2"
+                />
+                <Input
+                  type="number"
+                  placeholder="Hcp"
+                  value={row.opp2Handicap}
+                  onChange={(e) => updateRow(i, "opp2Handicap", e.target.value)}
+                  className="h-8 text-sm col-start-3 lg:col-start-auto"
+                />
+                <button
+                  type="button"
+                  onClick={() => updateRow(i, "isRedMatch", !row.isRedMatch)}
+                  className={`flex h-8 items-center justify-center rounded border text-xs font-medium transition-colors ${
+                    row.isRedMatch
+                      ? "border-red-400 bg-red-500 text-white"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                  title={row.isRedMatch ? "Red match (max 4 strokes)" : "Regular match (max 8 strokes)"}
+                >
+                  {row.isRedMatch ? "RED" : "Reg"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeRow(i)}
+                  className="flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Collapsible>
+
+      {/* Opponent Analysis */}
+      {opponentAnalysis && (
+        <Collapsible
+          title="Opponent Analysis"
+          badge={`${opponentAnalysis.totalPairs} pairs`}
+          defaultOpen={true}
+        >
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">Avg Combined Hcp</p>
+              <p className="text-xl font-semibold">{opponentAnalysis.avgCombinedHcp.toFixed(1)}</p>
+              <p className="text-xs text-muted-foreground">
+                Range: {opponentAnalysis.minHcp}–{opponentAnalysis.maxHcp}
+              </p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">Strongest Pair</p>
+              <p className="text-sm font-semibold">
+                {opponentAnalysis.strongestPair.opp1Name} & {opponentAnalysis.strongestPair.opp2Name}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Combined: {opponentAnalysis.strongestCombined.toFixed(1)}
+              </p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">Weakest Pair</p>
+              <p className="text-sm font-semibold">
+                {opponentAnalysis.weakestPair.opp1Name} & {opponentAnalysis.weakestPair.opp2Name}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Combined: {opponentAnalysis.weakestCombined.toFixed(1)}
+              </p>
+            </div>
+            {opponentAnalysis.redCount > 0 && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                <p className="text-xs text-red-600">Red Matches</p>
+                <p className="text-xl font-semibold text-red-700">{opponentAnalysis.redCount}</p>
+                <p className="text-xs text-red-600">
+                  Avg combined: {opponentAnalysis.redAvgCombined.toFixed(1)}
+                </p>
+              </div>
+            )}
+          </div>
+        </Collapsible>
+      )}
 
       {/* Available Players */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Available Players</CardTitle>
-              <CardDescription>
+      <Collapsible
+        title="Available Players"
+        badge={`${selectedCount} selected`}
+        open={playersOpen}
+        onOpenChange={setPlayersOpen}
+      >
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
                 {selectedCount} of {players.length} selected
-                {validPairs.length > 0 &&
-                  ` (need at least ${validPairs.length * 2} for ${validPairs.length} matches)`}
-              </CardDescription>
+                {validPairs.length > 0 && ` (need ≥${validPairs.length * 2})`}
+              </span>
             </div>
             <div className="flex gap-2">
+              <div className="flex rounded-md border">
+                <button
+                  type="button"
+                  onClick={() => setPlayerSort("name")}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                    playerSort === "name"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Name
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPlayerSort("handicap")}
+                  className={`border-l px-2.5 py-1 text-xs font-medium transition-colors ${
+                    playerSort === "handicap"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Handicap
+                </button>
+              </div>
               <Button variant="outline" size="sm" onClick={selectAll}>
                 Select All
               </Button>
@@ -328,15 +574,12 @@ export function CounterClient({
               </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
+
           {players.length === 0 ? (
-            <p className="text-muted-foreground">
-              No active players found. Add players first.
-            </p>
+            <p className="text-muted-foreground">No active players found.</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {players.map((p) => {
+              {sortedPlayers.map((p) => {
                 const isSelected = selectedIds.has(p.id);
                 return (
                   <button
@@ -369,8 +612,8 @@ export function CounterClient({
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Collapsible>
 
       {/* Venue + Generate */}
       <div className="flex flex-wrap items-end gap-4">
@@ -408,250 +651,240 @@ export function CounterClient({
         <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>
-            You have {validPairs.length} opponent pairs but only {selectedCount} player{selectedCount !== 1 ? "s" : ""} selected.
-            Need at least {validPairs.length * 2} players to counter all matches.
+            {validPairs.length} opponent pairs but only {selectedCount} player{selectedCount !== 1 ? "s" : ""} selected.
+            Need at least {validPairs.length * 2}.
           </span>
         </div>
       )}
 
       {/* Results */}
       {result !== null && (
-        <div className="space-y-4">
-          {/* Summary */}
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Card size="sm">
-              <CardContent className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-                  <Shield className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Matches Paired</p>
-                  <p className="text-lg font-semibold">
-                    {result.matchups.length} / {validPairs.length}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card size="sm">
-              <CardContent className="flex items-center gap-3">
-                <div
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
-                    result.avgCompetitiveness >= 0.5
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-red-100 text-red-700"
-                  }`}
-                >
-                  <span className="text-sm font-bold">
-                    {(result.avgCompetitiveness * 100).toFixed(0)}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Avg Competitiveness</p>
-                  <p className="text-lg font-semibold">
-                    {result.avgCompetitiveness >= 0.6
-                      ? "Strong"
-                      : result.avgCompetitiveness >= 0.45
-                        ? "Even"
-                        : "Tough"}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card size="sm">
-              <CardContent className="flex items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-                  <span className="text-sm font-bold">
-                    {result.unpairedPlayers.length}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Reserve Players</p>
-                  <p className="text-sm text-muted-foreground">
-                    {result.unpairedPlayers.length > 0
-                      ? result.unpairedPlayers.map((p) => p.name).join(", ")
-                      : "None"}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+        <Collapsible
+          title="Counter-Pairings"
+          badge={`${result.matchups.length} matchups`}
+          open={resultsOpen}
+          onOpenChange={setResultsOpen}
+        >
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Card size="sm">
+                <CardContent className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                    <Shield className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Matches Paired</p>
+                    <p className="text-lg font-semibold">
+                      {result.matchups.length} / {validPairs.length}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card size="sm">
+                <CardContent className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                      result.avgCompetitiveness >= 0.5
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-red-100 text-red-700"
+                    }`}
+                  >
+                    <span className="text-sm font-bold">
+                      {(result.avgCompetitiveness * 100).toFixed(0)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Avg Competitiveness</p>
+                    <p className="text-lg font-semibold">
+                      {result.avgCompetitiveness >= 0.6
+                        ? "Strong"
+                        : result.avgCompetitiveness >= 0.45
+                          ? "Even"
+                          : "Tough"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card size="sm">
+                <CardContent className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                    <span className="text-sm font-bold">
+                      {result.unpairedPlayers.length}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Reserve Players</p>
+                    <p className="text-sm text-muted-foreground">
+                      {result.unpairedPlayers.length > 0
+                        ? result.unpairedPlayers.map((p) => p.name).join(", ")
+                        : "None"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-          {/* Matchups */}
-          <h2 className="text-lg font-semibold">
-            Counter-Pairings ({result.matchups.length})
-          </h2>
+            {/* Matchups */}
+            {result.matchups.length === 0 ? (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  Not enough players to generate counter-pairings.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {result.matchups.map((m) => (
+                  <Card
+                    key={m.matchNumber}
+                    className={m.opponent.isRedMatch ? "border-red-300" : ""}
+                  >
+                    <CardContent className="py-4">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+                        {/* Match number */}
+                        <div className="flex items-center gap-2 lg:w-16 lg:shrink-0">
+                          <span
+                            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+                              m.opponent.isRedMatch
+                                ? "bg-red-100 text-red-700"
+                                : "bg-emerald-100 text-emerald-700"
+                            }`}
+                          >
+                            {m.matchNumber}
+                          </span>
+                          {m.opponent.isRedMatch && (
+                            <Badge variant="destructive" className="text-[10px]">
+                              RED
+                            </Badge>
+                          )}
+                        </div>
 
-          {result.matchups.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                Not enough players to generate counter-pairings.
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {result.matchups.map((m) => (
-                <Card
-                  key={m.matchNumber}
-                  className={m.opponent.isRedMatch ? "border-red-300" : ""}
-                >
-                  <CardContent className="py-4">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
-                      {/* Match number + red badge */}
-                      <div className="flex items-center gap-2 lg:w-16 lg:shrink-0">
-                        <span
-                          className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
-                            m.opponent.isRedMatch
-                              ? "bg-red-100 text-red-700"
-                              : "bg-emerald-100 text-emerald-700"
-                          }`}
-                        >
-                          {m.matchNumber}
-                        </span>
-                        {m.opponent.isRedMatch && (
-                          <Badge variant="destructive" className="text-[10px]">
-                            RED
-                          </Badge>
-                        )}
-                      </div>
-
-                      {/* Matchup details */}
-                      <div className="flex-1 space-y-3">
-                        {/* Our pair vs Their pair */}
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                          <div className="flex-1">
-                            <p className="text-xs font-medium text-emerald-600 uppercase tracking-wider">
-                              Our Pair
-                            </p>
-                            <p className="font-semibold">
-                              {m.ourPlayer1.name}{" "}
-                              <span className="text-muted-foreground font-normal">
-                                ({m.ourPlayer1.handicap})
-                              </span>
-                              <span className="text-xs text-emerald-600 ml-1">
-                                [{m.strokeAnalysis.ourPlayer1Strokes}]
-                              </span>
-                              <span className="text-xs text-gray-500 ml-1">
-                                eff. {m.strokeAnalysis.ourPlayer1EffHcp}
-                              </span>
-                              {m.strokeAnalysis.ourPlayer1Deficit > 0 && (
-                                <span className="text-xs text-amber-600 ml-1">
-                                  ⚠ -{m.strokeAnalysis.ourPlayer1Deficit}
+                        {/* Matchup details */}
+                        <div className="flex-1 space-y-3">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                            <div className="flex-1">
+                              <p className="text-xs font-medium text-emerald-600 uppercase tracking-wider">
+                                Our Pair
+                              </p>
+                              <p className="font-semibold">
+                                {m.ourPlayer1.name}{" "}
+                                <span className="text-muted-foreground font-normal">
+                                  ({m.ourPlayer1.handicap})
                                 </span>
-                              )}
-                            </p>
-                            <p className="font-semibold">
-                              {m.ourPlayer2.name}{" "}
-                              <span className="text-muted-foreground font-normal">
-                                ({m.ourPlayer2.handicap})
-                              </span>
-                              <span className="text-xs text-emerald-600 ml-1">
-                                [{m.strokeAnalysis.ourPlayer2Strokes}]
-                              </span>
-                              <span className="text-xs text-gray-500 ml-1">
-                                eff. {m.strokeAnalysis.ourPlayer2EffHcp}
-                              </span>
-                              {m.strokeAnalysis.ourPlayer2Deficit > 0 && (
-                                <span className="text-xs text-amber-600 ml-1">
-                                  ⚠ -{m.strokeAnalysis.ourPlayer2Deficit}
+                                <span className="text-xs text-emerald-600 ml-1">
+                                  [{m.strokeAnalysis.ourPlayer1Strokes}]
                                 </span>
-                              )}
-                            </p>
-                          </div>
+                                <span className="text-xs text-gray-500 ml-1">
+                                  eff. {m.strokeAnalysis.ourPlayer1EffHcp}
+                                </span>
+                                {m.strokeAnalysis.ourPlayer1Deficit > 0 && (
+                                  <span className="text-xs text-amber-600 ml-1">
+                                    ⚠ -{m.strokeAnalysis.ourPlayer1Deficit}
+                                  </span>
+                                )}
+                              </p>
+                              <p className="font-semibold">
+                                {m.ourPlayer2.name}{" "}
+                                <span className="text-muted-foreground font-normal">
+                                  ({m.ourPlayer2.handicap})
+                                </span>
+                                <span className="text-xs text-emerald-600 ml-1">
+                                  [{m.strokeAnalysis.ourPlayer2Strokes}]
+                                </span>
+                                <span className="text-xs text-gray-500 ml-1">
+                                  eff. {m.strokeAnalysis.ourPlayer2EffHcp}
+                                </span>
+                                {m.strokeAnalysis.ourPlayer2Deficit > 0 && (
+                                  <span className="text-xs text-amber-600 ml-1">
+                                    ⚠ -{m.strokeAnalysis.ourPlayer2Deficit}
+                                  </span>
+                                )}
+                              </p>
+                            </div>
 
-                          <div className="flex flex-col items-center gap-1 sm:gap-2">
-                            <span className="text-sm font-medium text-muted-foreground">
-                              vs
-                            </span>
-                            <div
-                              className={`rounded-lg px-3 py-1 text-center text-xs font-bold ${
-                                m.strokeAnalysis.bestVsBest > 1
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : m.strokeAnalysis.bestVsBest < -1
-                                    ? "bg-red-100 text-red-700"
-                                    : "bg-gray-100 text-gray-700"
-                              }`}
-                              title="Best vs Best effective handicap gap"
-                            >
-                              {m.strokeAnalysis.bestVsBest > 0 ? "+" : ""}
-                              {m.strokeAnalysis.bestVsBest} / {m.strokeAnalysis.secondVsSecond > 0 ? "+" : ""}
-                              {m.strokeAnalysis.secondVsSecond}
+                            <div className="flex flex-col items-center gap-1 sm:gap-2">
+                              <span className="text-sm font-medium text-muted-foreground">
+                                vs
+                              </span>
+                              <div
+                                className={`rounded-lg px-3 py-1 text-center text-xs font-bold ${
+                                  m.strokeAnalysis.bestVsBest > 1
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : m.strokeAnalysis.bestVsBest < -1
+                                      ? "bg-red-100 text-red-700"
+                                      : "bg-gray-100 text-gray-700"
+                                }`}
+                                title="Best vs Best / Second vs Second effective hcp gap"
+                              >
+                                {m.strokeAnalysis.bestVsBest > 0 ? "+" : ""}
+                                {m.strokeAnalysis.bestVsBest} / {m.strokeAnalysis.secondVsSecond > 0 ? "+" : ""}
+                                {m.strokeAnalysis.secondVsSecond}
+                              </div>
+                            </div>
+
+                            <div className="flex-1">
+                              <p className="text-xs font-medium text-red-600 uppercase tracking-wider">
+                                Their Pair
+                              </p>
+                              <p className="font-semibold">
+                                {m.opponent.opp1Name}{" "}
+                                <span className="text-muted-foreground font-normal">
+                                  ({m.opponent.opp1Handicap})
+                                </span>
+                                <span className="text-xs text-red-600 ml-1">
+                                  [{m.strokeAnalysis.opp1Strokes}]
+                                </span>
+                                <span className="text-xs text-gray-500 ml-1">
+                                  eff. {m.strokeAnalysis.opp1EffHcp}
+                                </span>
+                              </p>
+                              <p className="font-semibold">
+                                {m.opponent.opp2Name}{" "}
+                                <span className="text-muted-foreground font-normal">
+                                  ({m.opponent.opp2Handicap})
+                                </span>
+                                <span className="text-xs text-red-600 ml-1">
+                                  [{m.strokeAnalysis.opp2Strokes}]
+                                </span>
+                                <span className="text-xs text-gray-500 ml-1">
+                                  eff. {m.strokeAnalysis.opp2EffHcp}
+                                </span>
+                              </p>
                             </div>
                           </div>
 
-                          <div className="flex-1">
-                            <p className="text-xs font-medium text-red-600 uppercase tracking-wider">
-                              Their Pair
-                            </p>
-                            <p className="font-semibold">
-                              {m.opponent.opp1Name}{" "}
-                              <span className="text-muted-foreground font-normal">
-                                ({m.opponent.opp1Handicap})
-                              </span>
-                              <span className="text-xs text-red-600 ml-1">
-                                [{m.strokeAnalysis.opp1Strokes}]
-                              </span>
-                              <span className="text-xs text-gray-500 ml-1">
-                                eff. {m.strokeAnalysis.opp1EffHcp}
-                              </span>
-                            </p>
-                            <p className="font-semibold">
-                              {m.opponent.opp2Name}{" "}
-                              <span className="text-muted-foreground font-normal">
-                                ({m.opponent.opp2Handicap})
-                              </span>
-                              <span className="text-xs text-red-600 ml-1">
-                                [{m.strokeAnalysis.opp2Strokes}]
-                              </span>
-                              <span className="text-xs text-gray-500 ml-1">
-                                eff. {m.strokeAnalysis.opp2EffHcp}
-                              </span>
-                            </p>
+                          {/* Score breakdown */}
+                          <div className="space-y-1">
+                            <ScoreBar label="Competitive" value={m.breakdown.strokeAdvantage} />
+                            <ScoreBar label="Win Rate" value={m.breakdown.historicalWinRate} />
+                            <ScoreBar label="Form" value={m.breakdown.recentForm} />
+                            <ScoreBar label="Venue" value={m.breakdown.venueAffinity} />
+                          </div>
+
+                          {/* Reasoning */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {m.reasoning.map((r, ri) => (
+                              <Badge key={ri} variant="secondary" className="text-xs">
+                                {r}
+                              </Badge>
+                            ))}
                           </div>
                         </div>
 
-                        {/* Score breakdown */}
-                        <div className="space-y-1">
-                          <ScoreBar
-                            label="Competitive"
-                            value={m.breakdown.strokeAdvantage}
-                          />
-                          <ScoreBar
-                            label="Win Rate"
-                            value={m.breakdown.historicalWinRate}
-                          />
-                          <ScoreBar
-                            label="Form"
-                            value={m.breakdown.recentForm}
-                          />
-                          <ScoreBar
-                            label="Venue"
-                            value={m.breakdown.venueAffinity}
-                          />
-                        </div>
-
-                        {/* Reasoning */}
-                        <div className="flex flex-wrap gap-1.5">
-                          {m.reasoning.map((r, ri) => (
-                            <Badge key={ri} variant="secondary" className="text-xs">
-                              {r}
-                            </Badge>
-                          ))}
+                        {/* Overall score */}
+                        <div className="lg:w-14 lg:shrink-0 lg:text-center">
+                          <Badge className="text-base">
+                            {(m.score * 100).toFixed(0)}
+                          </Badge>
                         </div>
                       </div>
-
-                      {/* Overall score */}
-                      <div className="lg:w-14 lg:shrink-0 lg:text-center">
-                        <Badge className="text-base">
-                          {(m.score * 100).toFixed(0)}
-                        </Badge>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        </Collapsible>
       )}
     </div>
   );

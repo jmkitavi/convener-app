@@ -6,6 +6,8 @@ import {
   opponentClubs,
   fixtures,
   matches,
+  opponentLineups,
+  opponentLineupPairs,
 } from "@/db/schema";
 import { eq, desc, asc, and, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -634,5 +636,148 @@ export async function getAllMatches() {
     return { success: true, data: result };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as Array<Record<string, unknown>> };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Opponent Lineups
+// ---------------------------------------------------------------------------
+
+export async function saveLineup(data: {
+  name: string;
+  fixtureId?: number;
+  pairs: {
+    matchOrder: number;
+    opp1Name: string;
+    opp1Handicap: number;
+    opp2Name: string;
+    opp2Handicap: number;
+    isRedMatch: boolean;
+  }[];
+}): Promise<ActionResult<{ id: number }>> {
+  try {
+    const lineup = db
+      .insert(opponentLineups)
+      .values({
+        name: data.name,
+        fixtureId: data.fixtureId ?? null,
+      })
+      .returning()
+      .get();
+
+    if (data.pairs.length > 0) {
+      db.insert(opponentLineupPairs)
+        .values(
+          data.pairs.map((p) => ({
+            lineupId: lineup.id,
+            matchOrder: p.matchOrder,
+            opp1Name: p.opp1Name,
+            opp1Handicap: p.opp1Handicap,
+            opp2Name: p.opp2Name,
+            opp2Handicap: p.opp2Handicap,
+            isRedMatch: p.isRedMatch,
+          })),
+        )
+        .run();
+    }
+
+    revalidatePath("/analytics/counter");
+    return { success: true, data: { id: lineup.id } };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function getLineups(): Promise<
+  ActionResult<
+    {
+      id: number;
+      name: string;
+      fixtureId: number | null;
+      createdAt: string;
+      pairCount: number;
+    }[]
+  >
+> {
+  try {
+    const rows = db
+      .select({
+        id: opponentLineups.id,
+        name: opponentLineups.name,
+        fixtureId: opponentLineups.fixtureId,
+        createdAt: opponentLineups.createdAt,
+        pairCount: sql<number>`count(${opponentLineupPairs.id})`,
+      })
+      .from(opponentLineups)
+      .leftJoin(
+        opponentLineupPairs,
+        eq(opponentLineups.id, opponentLineupPairs.lineupId),
+      )
+      .groupBy(opponentLineups.id)
+      .orderBy(desc(opponentLineups.createdAt))
+      .all();
+    return { success: true, data: rows };
+  } catch (e) {
+    return { success: false, error: (e as Error).message, data: [] };
+  }
+}
+
+export async function getLineup(id: number): Promise<
+  ActionResult<{
+    id: number;
+    name: string;
+    fixtureId: number | null;
+    createdAt: string;
+    pairs: {
+      matchOrder: number;
+      opp1Name: string;
+      opp1Handicap: number;
+      opp2Name: string;
+      opp2Handicap: number;
+      isRedMatch: boolean;
+    }[];
+  }>
+> {
+  try {
+    const lineup = db
+      .select()
+      .from(opponentLineups)
+      .where(eq(opponentLineups.id, id))
+      .get();
+    if (!lineup) return { success: false, error: "Lineup not found" };
+
+    const pairs = db
+      .select()
+      .from(opponentLineupPairs)
+      .where(eq(opponentLineupPairs.lineupId, id))
+      .orderBy(asc(opponentLineupPairs.matchOrder))
+      .all();
+
+    return {
+      success: true,
+      data: {
+        ...lineup,
+        pairs: pairs.map((p) => ({
+          matchOrder: p.matchOrder,
+          opp1Name: p.opp1Name,
+          opp1Handicap: p.opp1Handicap,
+          opp2Name: p.opp2Name,
+          opp2Handicap: p.opp2Handicap,
+          isRedMatch: p.isRedMatch,
+        })),
+      },
+    };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
+export async function deleteLineup(id: number): Promise<ActionResult> {
+  try {
+    db.delete(opponentLineups).where(eq(opponentLineups.id, id)).run();
+    revalidatePath("/analytics/counter");
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
   }
 }

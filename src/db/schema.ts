@@ -45,3 +45,21 @@ export const matches = sqliteTable("matches", {
   matchOrder: integer("match_order"),
   notes: text("notes"),
 });
+
+export const opponentLineups = sqliteTable("opponent_lineups", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  fixtureId: integer("fixture_id").references(() => fixtures.id),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export const opponentLineupPairs = sqliteTable("opponent_lineup_pairs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  lineupId: integer("lineup_id").notNull().references(() => opponentLineups.id, { onDelete: "cascade" }),
+  matchOrder: integer("match_order").notNull(),
+  opp1Name: text("opp1_name").notNull(),
+  opp1Handicap: real("opp1_handicap").notNull(),
+  opp2Name: text("opp2_name").notNull(),
+  opp2Handicap: real("opp2_handicap").notNull(),
+  isRedMatch: integer("is_red_match", { mode: "boolean" }).notNull().default(false),
+});

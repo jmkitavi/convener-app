@@ -1,9 +1,11 @@
 import { db } from "@/db";
 import { players, opponentClubs } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
-import { getAllMatches } from "@/lib/actions";
+import { getAllMatches, getLineups } from "@/lib/actions";
 import type { MatchWithDetails } from "@/lib/analytics";
 import { CounterClient } from "./counter-client";
+
+export const dynamic = "force-dynamic";
 
 export default async function CounterPage() {
   const activePlayers = await db
@@ -20,11 +22,15 @@ export default async function CounterPage() {
   const result = await getAllMatches();
   const allMatches = (result.data ?? []) as MatchWithDetails[];
 
+  const lineupsResult = await getLineups();
+  const savedLineups = lineupsResult.data ?? [];
+
   return (
     <CounterClient
       players={activePlayers}
       clubs={allClubs}
       allMatches={allMatches}
+      savedLineups={savedLineups}
     />
   );
 }
