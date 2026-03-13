@@ -21,6 +21,7 @@ import {
   getTeamRecord,
   getRecentFixtureResults,
   getPlayerStats,
+  calcFixturePoints,
   type MatchWithDetails,
 } from "@/lib/analytics";
 import { db } from "@/db";
@@ -56,6 +57,11 @@ export default async function DashboardPage() {
 
   const record = getTeamRecord(allMatches);
   const recentFixtures = getRecentFixtureResults(allMatches, 5);
+  const allFixtureResults = getRecentFixtureResults(allMatches, 999);
+
+  // Total points across all fixtures
+  const totalTeamPts = allFixtureResults.reduce((sum, f) => sum + f.teamPoints, 0);
+  const totalMaxPts = allFixtureResults.reduce((sum, f) => sum + f.maxPoints, 0);
 
   // Player appearance counts and win rates (includes opponent-side for internal matches)
   // Halved matches count as 0.5 points
@@ -103,7 +109,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Team Record */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardHeader>
             <CardDescription>Overall Record</CardDescription>
@@ -115,6 +121,24 @@ export default async function DashboardPage() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Trophy className="h-4 w-4 text-emerald-600" />
               Win rate: {(record.winRate * 100).toFixed(1)}%
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardDescription>Total Points</CardDescription>
+            <CardTitle className="text-2xl">
+              {totalTeamPts.toFixed(2)}{" "}
+              <span className="text-base font-normal text-muted-foreground">
+                / {totalMaxPts.toFixed(2)}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <BarChart3 className="h-4 w-4 text-emerald-600" />
+              {allFixtureResults.length} fixture{allFixtureResults.length !== 1 ? "s" : ""} played
             </div>
           </CardContent>
         </Card>
@@ -209,7 +233,7 @@ export default async function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs tabular-nums text-muted-foreground">
-                    {f.wins}W-{f.losses}L-{f.halved}H
+                    {f.wins}W-{f.losses}L-{f.halved}H · {f.teamPoints.toFixed(2)}/{f.maxPoints.toFixed(2)}pts
                   </span>
                   <Badge variant={resultBadgeVariant(f.wins, f.losses)}>
                     {resultLabel(f.wins, f.losses, f.halved)}

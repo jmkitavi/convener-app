@@ -106,6 +106,15 @@ export default async function FixtureDetailPage({
   const halved = matchList.filter((m) => m.result === "halved").length;
   const pending = matchList.filter((m) => m.result === "pending").length;
 
+  // Points calculation
+  const decidedMatches = wins + losses + halved;
+  const totalMatches = matchList.length;
+  const ppm = totalMatches > 0 ? Math.round(Math.min(30 / totalMatches, 2) * 100) / 100 : 0;
+  const teamPoints = totalMatches > 0
+    ? Math.min(Math.round((wins * ppm + halved * ppm * 0.5) * 100) / 100, Math.min(totalMatches * ppm, 30))
+    : 0;
+  const maxPoints = totalMatches > 0 ? Math.min(Math.round(totalMatches * ppm * 100) / 100, 30) : 0;
+
   // Internal match = opponent club name contains "Kenya Airforce"
   const isInternalMatch = (fixture.clubName ?? "").includes("Kenya Airforce");
 
@@ -292,7 +301,7 @@ export default async function FixtureDetailPage({
 
       {/* Summary */}
       <Card size="sm">
-        <CardContent className="flex items-center gap-6">
+        <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <span className="text-sm text-muted-foreground">
             <strong className="text-foreground">{matchList.length}</strong>{" "}
             {matchList.length === 1 ? "match" : "matches"} recorded
@@ -314,6 +323,15 @@ export default async function FixtureDetailPage({
                   <strong className="text-yellow-600">{pending}</strong> Pending
                 </span>
               )}
+              <Separator orientation="vertical" className="h-4" />
+              <span className="text-sm font-medium">
+                <strong className="text-emerald-600">{teamPoints.toFixed(2)}</strong>
+                {" / "}
+                {maxPoints.toFixed(2)} pts
+                <span className="ml-1 text-xs text-muted-foreground">
+                  ({ppm.toFixed(2)}/match)
+                </span>
+              </span>
             </>
           )}
         </CardContent>

@@ -112,7 +112,33 @@ export type FixtureResult = {
   losses: number;
   halved: number;
   total: number;
+  teamPoints: number;
+  maxPoints: number;
+  pointsPerMatch: number;
 };
+
+export type FixturePoints = {
+  pointsPerMatch: number;
+  teamPoints: number;
+  opponentPoints: number;
+  maxPoints: number;
+};
+
+/** Calculate fixture points. 30 pts split across matches, capped at 2 pts/match. */
+export function calcFixturePoints(
+  totalMatches: number,
+  wins: number,
+  halved: number,
+): FixturePoints {
+  if (totalMatches === 0) return { pointsPerMatch: 0, teamPoints: 0, opponentPoints: 0, maxPoints: 0 };
+  const raw = 30 / totalMatches;
+  const pointsPerMatch = Math.min(raw, 2);
+  const ppm2 = Math.round(pointsPerMatch * 100) / 100;
+  const maxPoints = Math.min(Math.round(totalMatches * ppm2 * 100) / 100, 30);
+  const teamPoints = Math.min(Math.round((wins * ppm2 + halved * ppm2 * 0.5) * 100) / 100, maxPoints);
+  const opponentPoints = Math.round((maxPoints - teamPoints) * 100) / 100;
+  return { pointsPerMatch: ppm2, teamPoints, opponentPoints, maxPoints };
+}
 
 function calcWinRate(wins: number, total: number): number {
   if (total === 0) return 0;
@@ -486,6 +512,8 @@ export function getRecentFixtureResults(
       const losses = fMatches.filter((m) => m.result === "loss").length;
       const halved = fMatches.filter((m) => m.result === "halved").length;
 
+      const pts = calcFixturePoints(fMatches.length, wins, halved);
+
       return {
         fixtureId,
         fixtureDate: first.fixtureDate,
@@ -504,6 +532,9 @@ export function getRecentFixtureResults(
         losses,
         halved,
         total: fMatches.length,
+        teamPoints: pts.teamPoints,
+        maxPoints: pts.maxPoints,
+        pointsPerMatch: pts.pointsPerMatch,
       };
     },
   );
