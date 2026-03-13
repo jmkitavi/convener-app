@@ -75,11 +75,14 @@ type MatchHistoryEntry = {
   opponentClubName: string;
   partnerId: number;
   partnerName: string;
+  playerHandicap: number;
+  partnerHandicap: number;
   opponent1Name: string;
   opponent2Name: string;
+  opponent1Handicap: number;
+  opponent2Handicap: number;
   result: "win" | "loss" | "halved";
   margin: string | null;
-  playerHandicap: number;
 };
 
 interface PlayerDetailClientProps {
@@ -296,7 +299,7 @@ export function PlayerDetailClient({
             </TabsTrigger>
             <TabsTrigger value="partners">
               <UsersIcon className="size-4" />
-              Partners
+              Pairings
             </TabsTrigger>
             <TabsTrigger value="venues">
               <MapPinIcon className="size-4" />
@@ -374,7 +377,7 @@ export function PlayerDetailClient({
                   Recent Form
                 </CardTitle>
                 <CardDescription>
-                  Last {form.length} matches with running win rate
+                  Last {form.length} matches
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -384,11 +387,9 @@ export function PlayerDetailClient({
                       <TableRow>
                         <TableHead>Date</TableHead>
                         <TableHead>Opponent Club</TableHead>
-                        <TableHead>Venue</TableHead>
-                        <TableHead>Partner</TableHead>
+                        <TableHead>Pairing</TableHead>
+                        <TableHead>vs Opponents</TableHead>
                         <TableHead>Result</TableHead>
-                        <TableHead>Margin</TableHead>
-                        <TableHead className="text-right">Win Rate</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -396,21 +397,30 @@ export function PlayerDetailClient({
                         <TableRow key={m.id}>
                           <TableCell>{formatDate(m.fixtureDate)}</TableCell>
                           <TableCell>{m.opponentClubName}</TableCell>
-                          <TableCell>{m.venueName}</TableCell>
                           <TableCell>
+                            <span className="font-medium">{player.name}</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap})</span>
+                            {" / "}
                             <Link
                               href={`/players/${m.partnerId}`}
                               className="text-primary hover:underline"
                             >
                               {m.partnerName}
                             </Link>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap})</span>
+                          </TableCell>
+                          <TableCell>
+                            {m.opponent1Name}
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap})</span>
+                            {" / "}
+                            {m.opponent2Name}
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap})</span>
                           </TableCell>
                           <TableCell>
                             <ResultBadge result={m.result} />
-                          </TableCell>
-                          <TableCell>{m.margin ?? "—"}</TableCell>
-                          <TableCell className="text-right font-medium">
-                            {(m.runningWinRate * 100).toFixed(0)}%
+                            {m.margin && (
+                              <span className="ml-1.5 text-xs text-muted-foreground">{m.margin}</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -425,59 +435,59 @@ export function PlayerDetailClient({
             </Card>
           </TabsContent>
 
-          {/* Partners tab */}
+          {/* Pairings tab */}
           <TabsContent value="partners">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <UsersIcon className="size-4" />
-                  Partner Performance
+                  Pairings
                 </CardTitle>
                 <CardDescription>
-                  Combined record with each partner
+                  Match pairings and opponent matchups
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {stats.partners.length > 0 ? (
+                {matchHistory.length > 0 ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Partner</TableHead>
-                        <TableHead className="text-center">Played</TableHead>
-                        <TableHead className="text-center">Wins</TableHead>
-                        <TableHead className="text-center">Win Rate</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>vs</TableHead>
+                        <TableHead>Pairing</TableHead>
+                        <TableHead>Opponents</TableHead>
+                        <TableHead>Result</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {stats.partners.map((p) => (
-                        <TableRow key={p.partnerId}>
+                      {matchHistory.map((m) => (
+                        <TableRow key={m.id}>
+                          <TableCell className="text-xs">{formatDate(m.fixtureDate)}</TableCell>
+                          <TableCell className="text-xs">{m.opponentClubName}</TableCell>
                           <TableCell>
+                            <span className="font-medium">{player.name}</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap})</span>
+                            {" / "}
                             <Link
-                              href={`/players/${p.partnerId}`}
-                              className="text-primary hover:underline font-medium"
+                              href={`/players/${m.partnerId}`}
+                              className="text-primary hover:underline"
                             >
-                              {p.partnerName}
+                              {m.partnerName}
                             </Link>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap})</span>
                           </TableCell>
-                          <TableCell className="text-center">
-                            {p.played}
+                          <TableCell>
+                            {m.opponent1Name}
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap})</span>
+                            {" / "}
+                            {m.opponent2Name}
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap})</span>
                           </TableCell>
-                          <TableCell className="text-center">
-                            {p.wins}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <Badge
-                              variant={
-                                p.winRate >= 0.5 ? "default" : "secondary"
-                              }
-                              className={
-                                p.winRate >= 0.5
-                                  ? "bg-emerald-500 hover:bg-emerald-600"
-                                  : ""
-                              }
-                            >
-                              {(p.winRate * 100).toFixed(0)}%
-                            </Badge>
+                          <TableCell>
+                            <ResultBadge result={m.result} />
+                            {m.margin && (
+                              <span className="ml-1.5 text-xs text-muted-foreground">{m.margin}</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -485,7 +495,7 @@ export function PlayerDetailClient({
                   </Table>
                 ) : (
                   <p className="text-sm text-muted-foreground py-8 text-center">
-                    No partner data available.
+                    No pairing data available.
                   </p>
                 )}
               </CardContent>
@@ -580,37 +590,42 @@ export function PlayerDetailClient({
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
-                        <TableHead>Venue</TableHead>
                         <TableHead>Opponent Club</TableHead>
-                        <TableHead>Partner</TableHead>
-                        <TableHead>Opponents</TableHead>
-                        <TableHead>Hcp</TableHead>
+                        <TableHead>Pairing</TableHead>
+                        <TableHead>vs Opponents</TableHead>
                         <TableHead>Result</TableHead>
-                        <TableHead>Margin</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {matchHistory.map((m) => (
                         <TableRow key={m.id}>
                           <TableCell>{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell>{m.venueName}</TableCell>
                           <TableCell>{m.opponentClubName}</TableCell>
                           <TableCell>
+                            <span className="font-medium">{player.name}</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap})</span>
+                            {" / "}
                             <Link
                               href={`/players/${m.partnerId}`}
                               className="text-primary hover:underline"
                             >
                               {m.partnerName}
                             </Link>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap})</span>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {m.opponent1Name} &amp; {m.opponent2Name}
+                          <TableCell>
+                            {m.opponent1Name}
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap})</span>
+                            {" / "}
+                            {m.opponent2Name}
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap})</span>
                           </TableCell>
-                          <TableCell>{m.playerHandicap}</TableCell>
                           <TableCell>
                             <ResultBadge result={m.result} />
+                            {m.margin && (
+                              <span className="ml-1.5 text-xs text-muted-foreground">{m.margin}</span>
+                            )}
                           </TableCell>
-                          <TableCell>{m.margin ?? "—"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

@@ -105,6 +105,11 @@ export default async function PlayerDetailPage({
     let partnerId: number;
     let partnerName: string;
     let playerHandicap: number;
+    let partnerHandicap: number;
+    let opponent1Name: string;
+    let opponent2Name: string;
+    let opponent1Handicap: number;
+    let opponent2Handicap: number;
 
     if (onOppSide) {
       partnerId = m.opponent1Id === player.id ? (m.opponent2Id ?? 0) : (m.opponent1Id ?? 0);
@@ -112,10 +117,20 @@ export default async function PlayerDetailPage({
         ? (m.opponent2PlayerName ?? m.opponent2Name)
         : (m.opponent1PlayerName ?? m.opponent1Name);
       playerHandicap = m.opponent1Id === player.id ? m.opponent1Handicap : m.opponent2Handicap;
+      partnerHandicap = m.opponent1Id === player.id ? m.opponent2Handicap : m.opponent1Handicap;
+      opponent1Name = m.player1Name;
+      opponent2Name = m.player2Name;
+      opponent1Handicap = m.player1Handicap;
+      opponent2Handicap = m.player2Handicap;
     } else {
       partnerId = m.player1Id === player.id ? m.player2Id : m.player1Id;
       partnerName = m.player1Id === player.id ? m.player2Name : m.player1Name;
       playerHandicap = m.player1Id === player.id ? m.player1Handicap : m.player2Handicap;
+      partnerHandicap = m.player1Id === player.id ? m.player2Handicap : m.player1Handicap;
+      opponent1Name = m.opponent1Name;
+      opponent2Name = m.opponent2Name;
+      opponent1Handicap = m.opponent1Handicap;
+      opponent2Handicap = m.opponent2Handicap;
     }
 
     return {
@@ -125,11 +140,14 @@ export default async function PlayerDetailPage({
       opponentClubName: m.opponentClubName,
       partnerId,
       partnerName,
-      opponent1Name: onOppSide ? m.player1Name : m.opponent1Name,
-      opponent2Name: onOppSide ? m.player2Name : m.opponent2Name,
+      playerHandicap,
+      partnerHandicap,
+      opponent1Name,
+      opponent2Name,
+      opponent1Handicap,
+      opponent2Handicap,
       result: effectiveResult(m, player.id),
       margin: m.margin,
-      playerHandicap,
     };
   });
 
