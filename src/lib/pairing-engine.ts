@@ -338,3 +338,314 @@ export function suggestPairings(
 
   return suggestions.sort((a, b) => b.score - a.score).slice(0, topN);
 }
+
+// ---- Counter-Pairing Engine (Away Match) ----
+
+export type OpponentPair = {
+  opp1Name: string;
+  opp1Handicap: number;
+  opp2Name: string;
+  opp2Handicap: number;
+  isRedMatch: boolean;
+};
+
+export type StrokeAnalysis = {
+  backMarkerHandicap: number;
+  ourPlayer1Strokes: number;
+  ourPlayer2Strokes: number;
+  opp1Strokes: number;
+  opp2Strokes: number;
+  ourTotalStrokes: number;
+  oppTotalStrokes: number;
+  netAdvantage: number;
+  maxStrokes: number;
+};
+
+export type CounterMatchup = {
+  matchNumber: number;
+  ourPlayer1: AvailablePlayer;
+  ourPlayer2: AvailablePlayer;
+  opponent: OpponentPair;
+  score: number;
+  breakdown: {
+    strokeAdvantage: number;
+    historicalWinRate: number;
+    recentForm: number;
+    venueAffinity: number;
+  };
+  strokeAnalysis: StrokeAnalysis;
+  reasoning: string[];
+};
+
+export type CounterPairingResult = {
+  matchups: CounterMatchup[];
+  totalNetStrokes: number;
+  unpairedPlayers: AvailablePlayer[];
+};
+
+const COUNTER_WEIGHTS = {
+  strokeAdvantage: 0.4,
+  historicalWinRate: 0.25,
+  recentForm: 0.2,
+  venueAffinity: 0.15,
+} as const;
+
+/**
+ * NDC stroke allowance: 90% of handicap difference from back marker,
+ * capped at max strokes (4 for red matches, 8 for regular).
+ */
+function calculateStrokeAnalysis(
+  ourH1: number,
+  ourH2: number,
+  oppH1: number,
+  oppH2: number,
+  isRedMatch: boolean,
+): StrokeAnalysis {
+  const maxStrokes = isRedMatch ? 4 : 8;
+  const backMarker = Math.min(ourH1, ourH2, oppH1, oppH2);
+  const calc = (h: number) =>
+    Math.min(Math.max(Math.floor(0.9 * (h - backMarker)), 0), maxStrokes);
+
+  const ourP1 = calc(ourH1);
+  const ourP2 = calc(ourH2);
+  const opp1 = calc(oppH1);
+  const opp2 = calc(oppH2);
+
+  return {
+    backMarkerHandicap: backMarker,
+    ourPlayer1Strokes: ourP1,
+    ourPlayer2Strokes: ourP2,
+    opp1Strokes: opp1,
+    opp2Strokes: opp2,
+    ourTotalStrokes: ourP1 + ourP2,
+    oppTotalStrokes: opp1 + opp2,
+    netAdvantage: ourP1 + ourP2 - (opp1 + opp2),
+    maxStrokes,
+  };
+}
+
+function scoreStrokeAdvantage(analysis: StrokeAnalysis): number {
+  const maxRange = analysis.maxStrokes * 2;
+  if (maxRange === 0) return 0.5;
+  const normalized = (analysis.netAdvantage + maxRange) / (2 * maxRange);
+  return Math.max(0, Math.min(1, normalized));
+}
+
+function generateCounterReasoning(
+  strokeAnalysis: StrokeAnalysis,
+  pairData: {
+    played: number;
+    wins: number;
+    losses: number;
+    halved: number;
+    isUntested: boolean;
+  },
+  formData: { p1FormWinRate: number; p2FormWinRate: number },
+  venueData: { venueWins: number; venuePlayed: number },
+  isRedMatch: boolean,
+  venueName: string | undefined,
+): string[] {
+  const reasons: string[] = [];
+
+  if (strokeAnalysis.netAdvantage > 0) {
+    reasons.push(`+${strokeAnalysis.netAdvantage} stroke advantage`);
+  } else if (strokeAnalysis.netAdvantage < 0) {
+    reasons.push(`${strokeAnalysis.netAdvantage} stroke disadvantage`);
+  } else {
+    reasons.push("Level on strokes");
+  }
+
+  if (isRedMatch) {
+    reasons.push(`Red match (max ${strokeAnalysis.maxStrokes} strokes)`);
+  }
+
+  if (pairData.isUntested) {
+    reasons.push("Untested pairing");
+  } else {
+    const record = formatRecord(
+      pairData.wins,
+      pairData.losses,
+      pairData.halved,
+    );
+    reasons.push(`${record} together (${pairData.played} matches)`);
+    if (
+      pairData.played >= 3 &&
+      (pairData.wins + pairData.halved * 0.5) / pairData.played >= 0.7
+    ) {
+      reasons.push("Proven winning pair");
+    }
+  }
+
+  if (formData.p1FormWinRate >= 0.6 && formData.p2FormWinRate >= 0.6) {
+    reasons.push("Both in good form");
+  }
+
+  if (venueData.venuePlayed >= 2 && venueName) {
+    reasons.push(`${venueData.venueWins}/${venueData.venuePlayed} at venue`);
+  }
+
+  return reasons;
+}
+
+/**
+ * Given opponent pairs (received lineup), suggest counter-pairings
+ * from our available players. Processes red matches first, then
+ * strongest opponent pairs, using greedy assignment.
+ */
+export function suggestCounterPairings(
+  opponentPairs: OpponentPair[],
+  availablePlayers: AvailablePlayer[],
+  historicalMatches: MatchWithDetails[],
+  venueName?: string,
+): CounterPairingResult {
+  if (opponentPairs.length === 0 || availablePlayers.length < 2) {
+    return {
+      matchups: [],
+      totalNetStrokes: 0,
+      unpairedPlayers: [...availablePlayers],
+    };
+  }
+
+  // Pre-compute pairing stats for efficiency
+  const pairingStatsMap = new Map<
+    string,
+    {
+      played: number;
+      wins: number;
+      losses: number;
+      halved: number;
+      winRate: number;
+    }
+  >();
+  for (const ps of getPairingStats(historicalMatches)) {
+    pairingStatsMap.set(pairKey(ps.player1Id, ps.player2Id), ps);
+  }
+
+  // Track original order, then sort for strategic processing
+  const indexed = opponentPairs.map((opp, i) => ({
+    ...opp,
+    originalIndex: i,
+  }));
+  // Red matches first (limited strokes need careful matching), then strongest opponents
+  const processingOrder = [...indexed].sort((a, b) => {
+    if (a.isRedMatch && !b.isRedMatch) return -1;
+    if (!a.isRedMatch && b.isRedMatch) return 1;
+    return (
+      a.opp1Handicap + a.opp2Handicap - (b.opp1Handicap + b.opp2Handicap)
+    );
+  });
+
+  const usedPlayerIds = new Set<number>();
+  const matchups: CounterMatchup[] = [];
+
+  for (const opp of processingOrder) {
+    const remaining = availablePlayers.filter(
+      (p) => !usedPlayerIds.has(p.id),
+    );
+    if (remaining.length < 2) break;
+
+    let bestScore = -1;
+    let bestPair: [AvailablePlayer, AvailablePlayer] | null = null;
+    let bestBreakdown: CounterMatchup["breakdown"] | null = null;
+    let bestStroke: StrokeAnalysis | null = null;
+    let bestReasoning: string[] = [];
+
+    for (let i = 0; i < remaining.length; i++) {
+      for (let j = i + 1; j < remaining.length; j++) {
+        const p1 = remaining[i];
+        const p2 = remaining[j];
+
+        const strokeAnalysis = calculateStrokeAnalysis(
+          p1.handicap,
+          p2.handicap,
+          opp.opp1Handicap,
+          opp.opp2Handicap,
+          opp.isRedMatch,
+        );
+        const strokeScore = scoreStrokeAdvantage(strokeAnalysis);
+
+        const key = pairKey(p1.id, p2.id);
+        const pairStat = pairingStatsMap.get(key);
+        const played = pairStat?.played ?? 0;
+        const wins = pairStat?.wins ?? 0;
+        const halved = pairStat?.halved ?? 0;
+        const losses = pairStat?.losses ?? 0;
+        const { score: winRateScore, isUntested } = scoreHistoricalWinRate(
+          wins + halved * 0.5,
+          played,
+        );
+
+        const formResult = scoreRecentForm(historicalMatches, p1.id, p2.id);
+
+        const pairMatches = historicalMatches.filter(
+          (m) =>
+            (m.player1Id === p1.id && m.player2Id === p2.id) ||
+            (m.player1Id === p2.id && m.player2Id === p1.id),
+        );
+        const venueResult = scoreVenueAffinity(
+          pairMatches,
+          historicalMatches,
+          p1.id,
+          p2.id,
+          venueName,
+        );
+
+        const breakdown = {
+          strokeAdvantage: Math.round(strokeScore * 1000) / 1000,
+          historicalWinRate: Math.round(winRateScore * 1000) / 1000,
+          recentForm: Math.round(formResult.score * 1000) / 1000,
+          venueAffinity: Math.round(venueResult.score * 1000) / 1000,
+        };
+
+        const totalScore =
+          breakdown.strokeAdvantage * COUNTER_WEIGHTS.strokeAdvantage +
+          breakdown.historicalWinRate * COUNTER_WEIGHTS.historicalWinRate +
+          breakdown.recentForm * COUNTER_WEIGHTS.recentForm +
+          breakdown.venueAffinity * COUNTER_WEIGHTS.venueAffinity;
+
+        if (totalScore > bestScore) {
+          bestScore = totalScore;
+          bestPair = [p1, p2];
+          bestBreakdown = breakdown;
+          bestStroke = strokeAnalysis;
+          bestReasoning = generateCounterReasoning(
+            strokeAnalysis,
+            { played, wins, losses, halved, isUntested },
+            formResult,
+            venueResult,
+            opp.isRedMatch,
+            venueName,
+          );
+        }
+      }
+    }
+
+    if (bestPair && bestBreakdown && bestStroke) {
+      usedPlayerIds.add(bestPair[0].id);
+      usedPlayerIds.add(bestPair[1].id);
+      matchups.push({
+        matchNumber: opp.originalIndex + 1,
+        ourPlayer1: bestPair[0],
+        ourPlayer2: bestPair[1],
+        opponent: opp,
+        score: Math.round(bestScore * 1000) / 1000,
+        breakdown: bestBreakdown,
+        strokeAnalysis: bestStroke,
+        reasoning: bestReasoning,
+      });
+    }
+  }
+
+  // Re-sort by original match order for display
+  matchups.sort((a, b) => a.matchNumber - b.matchNumber);
+
+  const totalNetStrokes = matchups.reduce(
+    (sum, m) => sum + m.strokeAnalysis.netAdvantage,
+    0,
+  );
+  const unpairedPlayers = availablePlayers.filter(
+    (p) => !usedPlayerIds.has(p.id),
+  );
+
+  return { matchups, totalNetStrokes, unpairedPlayers };
+}

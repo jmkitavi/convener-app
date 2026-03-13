@@ -4,6 +4,7 @@ import {
   GitCompareArrows,
   MapPin,
   Lightbulb,
+  Shield,
   TrendingUp,
 } from "lucide-react";
 import {
@@ -43,8 +44,14 @@ const subPages = [
   {
     href: "/analytics/suggest",
     title: "Pairing Suggestions",
-    description: "AI-powered optimal pairing recommendations",
+    description: "Optimal pairing recommendations for home matches",
     icon: Lightbulb,
+  },
+  {
+    href: "/analytics/counter",
+    title: "Counter-Pairing",
+    description: "Counter opponent lineups for away matches with stroke analysis",
+    icon: Shield,
   },
 ] as const;
 
