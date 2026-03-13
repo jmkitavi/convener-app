@@ -61,6 +61,8 @@ type SavedLineup = {
   id: number;
   name: string;
   fixtureId: number | null;
+  clubId: number | null;
+  clubName: string | null;
   createdAt: string;
   pairCount: number;
 };
@@ -117,6 +119,7 @@ export function CounterClient({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [playerSort, setPlayerSort] = useState<"name" | "handicap">("name");
   const [venueName, setVenueName] = useState<string | undefined>(undefined);
+  const [selectedClubId, setSelectedClubId] = useState<number | undefined>(undefined);
   const [result, setResult] = useState<CounterPairingResult | null>(null);
 
   // Collapsible state
@@ -219,15 +222,16 @@ export function CounterClient({
     startTransition(async () => {
       const res = await saveLineup({
         name: saveName.trim(),
+        clubId: selectedClubId,
         pairs: pairs.map((p, i) => ({ ...p, matchOrder: i + 1 })),
       });
       if (res.success) {
         setSaveDialogOpen(false);
         setSaveName("");
         router.refresh();
-        // Optimistic update
+        const club = selectedClubId ? clubs.find((c) => c.id === selectedClubId) : undefined;
         setSavedLineups((prev) => [
-          { id: res.data!.id, name: saveName.trim(), fixtureId: null, createdAt: new Date().toISOString(), pairCount: pairs.length },
+          { id: res.data!.id, name: saveName.trim(), fixtureId: null, clubId: selectedClubId ?? null, clubName: club?.name ?? null, createdAt: new Date().toISOString(), pairCount: pairs.length },
           ...prev,
         ]);
       }
@@ -236,6 +240,7 @@ export function CounterClient({
 
   // Load lineup
   async function handleLoad(id: number) {
+    const lineup = savedLineups.find((l) => l.id === id);
     startTransition(async () => {
       const res = await getLineup(id);
       if (res.success && res.data) {
@@ -250,6 +255,12 @@ export function CounterClient({
         setLoadDialogOpen(false);
         setResult(null);
         setLineupOpen(true);
+        // Set club and venue from lineup
+        if (res.data.clubId) {
+          setSelectedClubId(res.data.clubId);
+          const club = clubs.find((c) => c.id === res.data!.clubId);
+          if (club) setVenueName(club.name);
+        }
       }
     });
   }
@@ -328,43 +339,73 @@ export function CounterClient({
         onOpenChange={setLineupOpen}
       >
         <div className="space-y-3">
-          {/* Save/Load toolbar */}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => { setSaveDialogOpen(true); setSaveName(""); }}
-              disabled={validPairs.length === 0}
-            >
-              <Save className="mr-1 h-3 w-3" />
-              Save Lineup
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setLoadDialogOpen(!loadDialogOpen)}
-            >
-              <FolderOpen className="mr-1 h-3 w-3" />
-              Load Lineup
-              {savedLineups.length > 0 && (
-                <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px]">{savedLineups.length}</span>
-              )}
-            </Button>
+          {/* Club selector + Save/Load toolbar */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Opponent Club</Label>
+              <Select
+                value={selectedClubId ? String(selectedClubId) : ""}
+                onValueChange={(val) => {
+                  const id = val ? parseInt(val) : undefined;
+                  setSelectedClubId(id);
+                  if (id) {
+                    const club = clubs.find((c) => c.id === id);
+                    if (club) setVenueName(club.name);
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 w-52">
+                  <SelectValue placeholder="Select club" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">No club</SelectItem>
+                  {clubs.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end gap-2 pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setSaveDialogOpen(true); setSaveName(""); }}
+                disabled={validPairs.length === 0}
+              >
+                <Save className="mr-1 h-3 w-3" />
+                Save
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLoadDialogOpen(!loadDialogOpen)}
+              >
+                <FolderOpen className="mr-1 h-3 w-3" />
+                Load
+                {savedLineups.length > 0 && (
+                  <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px]">{savedLineups.length}</span>
+                )}
+              </Button>
+            </div>
             <div className="flex-1" />
-            <Button variant="outline" size="sm" onClick={addRow}>
-              <Plus className="mr-1 h-3 w-3" />
-              Add Match
-            </Button>
+            <div className="pt-4">
+              <Button variant="outline" size="sm" onClick={addRow}>
+                <Plus className="mr-1 h-3 w-3" />
+                Add Match
+              </Button>
+            </div>
           </div>
 
           {/* Save dialog inline */}
           {saveDialogOpen && (
-            <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
               <Input
                 placeholder="Lineup name (e.g., Thika SC - Mar 2026)"
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
-                className="h-8 flex-1"
+                className="h-8 flex-1 min-w-[200px]"
                 onKeyDown={(e) => e.key === "Enter" && handleSave()}
               />
               <Button size="sm" onClick={handleSave} disabled={!saveName.trim() || isPending}>
@@ -391,6 +432,11 @@ export function CounterClient({
                       disabled={isPending}
                     >
                       <span className="font-medium">{l.name}</span>
+                      {l.clubName && (
+                        <span className="ml-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-muted-foreground">
+                          {l.clubName}
+                        </span>
+                      )}
                       <span className="ml-2 text-muted-foreground">
                         {l.pairCount} pairs • {new Date(l.createdAt).toLocaleDateString()}
                       </span>

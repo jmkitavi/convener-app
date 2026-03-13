@@ -646,6 +646,7 @@ export async function getAllMatches() {
 export async function saveLineup(data: {
   name: string;
   fixtureId?: number;
+  clubId?: number;
   pairs: {
     matchOrder: number;
     opp1Name: string;
@@ -661,6 +662,7 @@ export async function saveLineup(data: {
       .values({
         name: data.name,
         fixtureId: data.fixtureId ?? null,
+        clubId: data.clubId ?? null,
       })
       .returning()
       .get();
@@ -694,6 +696,8 @@ export async function getLineups(): Promise<
       id: number;
       name: string;
       fixtureId: number | null;
+      clubId: number | null;
+      clubName: string | null;
       createdAt: string;
       pairCount: number;
     }[]
@@ -705,6 +709,8 @@ export async function getLineups(): Promise<
         id: opponentLineups.id,
         name: opponentLineups.name,
         fixtureId: opponentLineups.fixtureId,
+        clubId: opponentLineups.clubId,
+        clubName: opponentClubs.name,
         createdAt: opponentLineups.createdAt,
         pairCount: sql<number>`count(${opponentLineupPairs.id})`,
       })
@@ -712,6 +718,10 @@ export async function getLineups(): Promise<
       .leftJoin(
         opponentLineupPairs,
         eq(opponentLineups.id, opponentLineupPairs.lineupId),
+      )
+      .leftJoin(
+        opponentClubs,
+        eq(opponentLineups.clubId, opponentClubs.id),
       )
       .groupBy(opponentLineups.id)
       .orderBy(desc(opponentLineups.createdAt))
@@ -727,6 +737,7 @@ export async function getLineup(id: number): Promise<
     id: number;
     name: string;
     fixtureId: number | null;
+    clubId: number | null;
     createdAt: string;
     pairs: {
       matchOrder: number;

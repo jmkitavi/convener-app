@@ -50,6 +50,7 @@ export const opponentLineups = sqliteTable("opponent_lineups", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   fixtureId: integer("fixture_id").references(() => fixtures.id),
+  clubId: integer("club_id").references(() => opponentClubs.id),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
