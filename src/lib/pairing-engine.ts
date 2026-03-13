@@ -374,7 +374,7 @@ export type StrokeAnalysis = {
   secondVsSecond: number;
 };
 
-export type MatchTier = "target" | "competitive" | "concede";
+export type MatchTier = "target" | "target_half" | "competitive" | "concede";
 
 export type CounterMatchup = {
   matchNumber: number;
@@ -401,7 +401,7 @@ export type CounterPairingResult = {
   totalNetStrokes: number;
   avgCompetitiveness: number;
   unpairedPlayers: AvailablePlayer[];
-  tierSummary: { target: number; competitive: number; concede: number };
+  tierSummary: { target: number; target_half: number; competitive: number; concede: number };
 };
 
 /** Player priority thresholds */
@@ -604,6 +604,8 @@ function generateCounterReasoning(
     reasons.push("🏳 Concede — save strength elsewhere");
   } else if (tier === "target") {
     reasons.push("🎯 Target win");
+  } else if (tier === "target_half") {
+    reasons.push("🤝 Target half");
   }
 
   // Effective spread summary
@@ -672,12 +674,15 @@ function generateCounterReasoning(
 const CONCEDE_THRESHOLD = 4.0;
 /** Matches with spread below this are target wins */
 const TARGET_THRESHOLD = 2.0;
+/** Matches between target and competitive — realistic half opportunity */
+const TARGET_HALF_THRESHOLD = 3.0;
 
 /**
  * Determine match tier based on best achievable competitiveness.
  */
 function classifyTier(effectiveSpread: number): MatchTier {
   if (effectiveSpread <= TARGET_THRESHOLD) return "target";
+  if (effectiveSpread <= TARGET_HALF_THRESHOLD) return "target_half";
   if (effectiveSpread <= CONCEDE_THRESHOLD) return "competitive";
   return "concede";
 }
@@ -704,7 +709,7 @@ export function suggestCounterPairings(
       totalNetStrokes: 0,
       avgCompetitiveness: 0,
       unpairedPlayers: [...availablePlayers],
-      tierSummary: { target: 0, competitive: 0, concede: 0 },
+      tierSummary: { target: 0, target_half: 0, competitive: 0, concede: 0 },
     };
   }
 
@@ -1014,6 +1019,7 @@ export function suggestCounterPairings(
 
   const tierSummary = {
     target: matchups.filter((m) => m.tier === "target").length,
+    target_half: matchups.filter((m) => m.tier === "target_half").length,
     competitive: matchups.filter((m) => m.tier === "competitive").length,
     concede: matchups.filter((m) => m.tier === "concede").length,
   };

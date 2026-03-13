@@ -761,13 +761,15 @@ export function CounterClient({
                 <CardContent className="flex items-center gap-3">
                   <div className="flex flex-col items-center gap-0.5 shrink-0">
                     <span className="text-xs font-bold text-emerald-600">🎯 {result.tierSummary.target}</span>
+                    <span className="text-xs font-bold text-blue-600">🤝 {result.tierSummary.target_half}</span>
                     <span className="text-xs font-bold text-amber-600">⚔ {result.tierSummary.competitive}</span>
                     <span className="text-xs font-bold text-gray-400">🏳 {result.tierSummary.concede}</span>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Match Strategy</p>
                     <p className="text-sm">
-                      <span className="text-emerald-600">{result.tierSummary.target} target</span>
+                      <span className="text-emerald-600">{result.tierSummary.target} win</span>
+                      {result.tierSummary.target_half > 0 && <span className="text-blue-600"> · {result.tierSummary.target_half} half</span>}
                       {result.tierSummary.competitive > 0 && <span className="text-amber-600"> · {result.tierSummary.competitive} fight</span>}
                       {result.tierSummary.concede > 0 && <span className="text-gray-400"> · {result.tierSummary.concede} concede</span>}
                     </p>
@@ -803,11 +805,12 @@ export function CounterClient({
             ) : (
               <div className="space-y-6">
                 {/* Group by tier */}
-                {(["target", "competitive", "concede"] as const).map((tier) => {
+                {(["target", "target_half", "competitive", "concede"] as const).map((tier) => {
                   const tierMatchups = result.matchups.filter((m) => m.tier === tier);
                   if (tierMatchups.length === 0) return null;
                   const tierConfig = {
                     target: { label: "🎯 Target Wins", color: "text-emerald-700", border: "border-emerald-200", bg: "bg-emerald-50" },
+                    target_half: { label: "🤝 Target Half", color: "text-blue-700", border: "border-blue-200", bg: "bg-blue-50" },
                     competitive: { label: "⚔ Competitive", color: "text-amber-700", border: "border-amber-200", bg: "bg-amber-50" },
                     concede: { label: "🏳 Concede", color: "text-gray-500", border: "border-gray-200", bg: "bg-gray-50" },
                   }[tier];
@@ -832,7 +835,9 @@ export function CounterClient({
                           ? "border-gray-200 opacity-75"
                           : tier === "target"
                             ? "border-emerald-200"
-                            : ""
+                            : tier === "target_half"
+                              ? "border-blue-200"
+                              : ""
                     }
                   >
                     <CardContent className="py-4">
@@ -846,7 +851,9 @@ export function CounterClient({
                                   ? "bg-red-100 text-red-700"
                                   : tier === "concede"
                                     ? "bg-gray-100 text-gray-500"
-                                    : "bg-emerald-100 text-emerald-700"
+                                    : tier === "target_half"
+                                      ? "bg-blue-100 text-blue-700"
+                                      : "bg-emerald-100 text-emerald-700"
                               }`}
                             >
                               {m.matchNumber}
@@ -862,9 +869,11 @@ export function CounterClient({
                             className={`text-[10px] ${
                               tier === "target"
                                 ? "bg-emerald-100 text-emerald-700"
-                                : tier === "concede"
-                                  ? "bg-gray-100 text-gray-500"
-                                  : "bg-amber-100 text-amber-700"
+                                : tier === "target_half"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : tier === "concede"
+                                    ? "bg-gray-100 text-gray-500"
+                                    : "bg-amber-100 text-amber-700"
                             }`}
                           >
                             {m.effectiveSpread.toFixed(1)} spread

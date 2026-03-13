@@ -244,21 +244,25 @@ Scoring approach:
 - **Deficit penalty**: Subtract 0.1 per stroke of deficit on our players
 - **Band bonus**: +0.05 if all 4 raw handicaps are within 8 strokes of each other
 
-### 9.2 Strategic Allocation: Concede & Focus
+### 9.2 Strategic Allocation: 4-Tier Model
 
-Not every match can be won. The engine should:
+Not every match can be won. The engine classifies each matchup into four tiers based on effective spread:
 
-1. **Identify unwinnable matches**: Opponent pairs where no available pair can achieve effective spread < 4.0
-2. **Concede these early**: Assign weakest remaining players to unwinnable matches
-3. **Focus resources**: Deploy best players against matches where we can achieve effective spread < 2.0
-4. **Maximize expected points**: Better to win 5 and lose 10 than to lose all 15 narrowly
+| Tier | Spread Range | Strategy | Expected Outcome |
+|------|-------------|----------|-----------------|
+| 🎯 **Target Win** | ≤ 2.0 | Deploy best pair, optimize for full 2 pts | Win (2 pts) |
+| 🤝 **Target Half** | 2.0 – 3.0 | Deploy solid pair, play for a half | Half (1 pt) |
+| ⚔ **Competitive** | 3.0 – 4.0 | Deploy decent pair, fight for what you can | Upset possible |
+| 🏳 **Concede** | > 4.0 | Assign weakest players, save strength | Loss (0 pts) |
+
+The **Target Half** tier recognizes that in NDC scoring, a half = 1 point. Matches in the 2.0–3.0 spread range are too wide for confident wins but close enough that a half is achievable with solid play.
 
 Implementation:
 ```
 Phase 1: Score all (opponent, our_pair) combinations
-Phase 2: Identify opponent pairs where best possible our_pair score < threshold
-Phase 3: Assign sacrificial pairs to unwinnable matches
-Phase 4: Optimally assign remaining players to winnable matches
+Phase 2: Classify each opponent pair by best achievable spread → tier
+Phase 3: Assign concession matches first (weakest players)
+Phase 4: Assign target/target_half/competitive matches (strongest players first)
 ```
 
 ### 9.3 Updated Weight Distribution
