@@ -781,7 +781,7 @@ export function CounterClient({
                     <p className="text-xs text-muted-foreground">Reserve Players</p>
                     <p className="text-sm text-muted-foreground">
                       {result.unpairedPlayers.length > 0
-                        ? result.unpairedPlayers.map((p) => p.name).join(", ")
+                        ? result.unpairedPlayers.map((p) => `${p.name}(${p.handicap})`).join(", ")
                         : "None"}
                     </p>
                   </div>
