@@ -359,6 +359,19 @@ export type StrokeAnalysis = {
   oppTotalStrokes: number;
   netAdvantage: number;
   maxStrokes: number;
+  // Effective handicaps after stroke allocation (lower = stronger)
+  ourPlayer1EffHcp: number;
+  ourPlayer2EffHcp: number;
+  opp1EffHcp: number;
+  opp2EffHcp: number;
+  // Strokes lost to the cap (0 = fully covered, >0 = under-compensated)
+  ourPlayer1Deficit: number;
+  ourPlayer2Deficit: number;
+  opp1Deficit: number;
+  opp2Deficit: number;
+  // 4BBB competitiveness gaps (positive = our advantage)
+  bestVsBest: number;
+  secondVsSecond: number;
 };
 
 export type CounterMatchup = {
@@ -380,6 +393,7 @@ export type CounterMatchup = {
 export type CounterPairingResult = {
   matchups: CounterMatchup[];
   totalNetStrokes: number;
+  avgCompetitiveness: number; // average of per-matchup competitiveness scores (0–1)
   unpairedPlayers: AvailablePlayer[];
 };
 
@@ -393,6 +407,7 @@ const COUNTER_WEIGHTS = {
 /**
  * NDC stroke allowance: 90% of handicap difference from back marker,
  * capped at max strokes (4 for red matches, 8 for regular).
+ * Also computes effective handicaps and 4BBB competitiveness gaps.
  */
 function calculateStrokeAnalysis(
   ourH1: number,
@@ -403,13 +418,36 @@ function calculateStrokeAnalysis(
 ): StrokeAnalysis {
   const maxStrokes = isRedMatch ? 4 : 8;
   const backMarker = Math.min(ourH1, ourH2, oppH1, oppH2);
-  const calc = (h: number) =>
-    Math.min(Math.max(Math.floor(0.9 * (h - backMarker)), 0), maxStrokes);
 
-  const ourP1 = calc(ourH1);
-  const ourP2 = calc(ourH2);
-  const opp1 = calc(oppH1);
-  const opp2 = calc(oppH2);
+  const uncapped = (h: number) => Math.max(Math.floor(0.9 * (h - backMarker)), 0);
+  const capped = (h: number) => Math.min(uncapped(h), maxStrokes);
+
+  const ourP1 = capped(ourH1);
+  const ourP2 = capped(ourH2);
+  const opp1 = capped(oppH1);
+  const opp2 = capped(oppH2);
+
+  // Effective handicap = raw handicap minus strokes received
+  const ourEff1 = ourH1 - ourP1;
+  const ourEff2 = ourH2 - ourP2;
+  const oppEff1 = oppH1 - opp1;
+  const oppEff2 = oppH2 - opp2;
+
+  // Deficit: strokes needed but not received due to cap
+  const ourDef1 = uncapped(ourH1) - ourP1;
+  const ourDef2 = uncapped(ourH2) - ourP2;
+  const oppDef1 = uncapped(oppH1) - opp1;
+  const oppDef2 = uncapped(oppH2) - opp2;
+
+  // 4BBB competitiveness: best ball of each pair
+  const ourBestEff = Math.min(ourEff1, ourEff2);
+  const ourSecondEff = Math.max(ourEff1, ourEff2);
+  const oppBestEff = Math.min(oppEff1, oppEff2);
+  const oppSecondEff = Math.max(oppEff1, oppEff2);
+
+  // Positive = our advantage (their effective is higher = weaker)
+  const bestVsBest = oppBestEff - ourBestEff;
+  const secondVsSecond = oppSecondEff - ourSecondEff;
 
   return {
     backMarkerHandicap: backMarker,
@@ -421,13 +459,31 @@ function calculateStrokeAnalysis(
     oppTotalStrokes: opp1 + opp2,
     netAdvantage: ourP1 + ourP2 - (opp1 + opp2),
     maxStrokes,
+    ourPlayer1EffHcp: Math.round(ourEff1 * 10) / 10,
+    ourPlayer2EffHcp: Math.round(ourEff2 * 10) / 10,
+    opp1EffHcp: Math.round(oppEff1 * 10) / 10,
+    opp2EffHcp: Math.round(oppEff2 * 10) / 10,
+    ourPlayer1Deficit: ourDef1,
+    ourPlayer2Deficit: ourDef2,
+    opp1Deficit: oppDef1,
+    opp2Deficit: oppDef2,
+    bestVsBest: Math.round(bestVsBest * 10) / 10,
+    secondVsSecond: Math.round(secondVsSecond * 10) / 10,
   };
 }
 
+/**
+ * Score stroke advantage based on effective handicap competitiveness.
+ * In 4BBB, at least one player must compete per hole, so we weight:
+ * - Best vs Best (60%): can our strongest player match theirs?
+ * - Second vs Second (40%): is our second player also competitive?
+ * Normalized to 0–1 where 0.5 = even, 1.0 = dominant, 0.0 = outclassed.
+ */
 function scoreStrokeAdvantage(analysis: StrokeAnalysis): number {
-  const maxRange = analysis.maxStrokes * 2;
-  if (maxRange === 0) return 0.5;
-  const normalized = (analysis.netAdvantage + maxRange) / (2 * maxRange);
+  const composite =
+    analysis.bestVsBest * 0.6 + analysis.secondVsSecond * 0.4;
+  // ±10 window: a 10-stroke effective advantage is near-max
+  const normalized = (composite + 10) / 20;
   return Math.max(0, Math.min(1, normalized));
 }
 
@@ -444,15 +500,29 @@ function generateCounterReasoning(
   venueData: { venueWins: number; venuePlayed: number },
   isRedMatch: boolean,
   venueName: string | undefined,
+  p1Name: string,
+  p2Name: string,
 ): string[] {
   const reasons: string[] = [];
 
-  if (strokeAnalysis.netAdvantage > 0) {
-    reasons.push(`+${strokeAnalysis.netAdvantage} stroke advantage`);
-  } else if (strokeAnalysis.netAdvantage < 0) {
-    reasons.push(`${strokeAnalysis.netAdvantage} stroke disadvantage`);
-  } else {
-    reasons.push("Level on strokes");
+  // Effective handicap position summary
+  const ourBest = Math.min(strokeAnalysis.ourPlayer1EffHcp, strokeAnalysis.ourPlayer2EffHcp);
+  const ourSecond = Math.max(strokeAnalysis.ourPlayer1EffHcp, strokeAnalysis.ourPlayer2EffHcp);
+  const oppBest = Math.min(strokeAnalysis.opp1EffHcp, strokeAnalysis.opp2EffHcp);
+  const oppSecond = Math.max(strokeAnalysis.opp1EffHcp, strokeAnalysis.opp2EffHcp);
+  reasons.push(`Eff. ${ourBest} & ${ourSecond} vs ${oppBest} & ${oppSecond}`);
+
+  // Deficit warnings
+  const deficits: string[] = [];
+  if (strokeAnalysis.ourPlayer1Deficit > 0) {
+    const name = strokeAnalysis.ourPlayer1EffHcp <= strokeAnalysis.ourPlayer2EffHcp ? p1Name : p1Name;
+    deficits.push(`${p1Name} capped ${strokeAnalysis.ourPlayer1Deficit} short`);
+  }
+  if (strokeAnalysis.ourPlayer2Deficit > 0) {
+    deficits.push(`${p2Name} capped ${strokeAnalysis.ourPlayer2Deficit} short`);
+  }
+  if (deficits.length > 0) {
+    reasons.push(`⚠ ${deficits.join(", ")}`);
   }
 
   if (isRedMatch) {
@@ -502,6 +572,7 @@ export function suggestCounterPairings(
     return {
       matchups: [],
       totalNetStrokes: 0,
+      avgCompetitiveness: 0,
       unpairedPlayers: [...availablePlayers],
     };
   }
@@ -615,6 +686,8 @@ export function suggestCounterPairings(
             venueResult,
             opp.isRedMatch,
             venueName,
+            p1.name,
+            p2.name,
           );
         }
       }
@@ -643,9 +716,14 @@ export function suggestCounterPairings(
     (sum, m) => sum + m.strokeAnalysis.netAdvantage,
     0,
   );
+  const avgCompetitiveness =
+    matchups.length > 0
+      ? matchups.reduce((sum, m) => sum + m.breakdown.strokeAdvantage, 0) /
+        matchups.length
+      : 0;
   const unpairedPlayers = availablePlayers.filter(
     (p) => !usedPlayerIds.has(p.id),
   );
 
-  return { matchups, totalNetStrokes, unpairedPlayers };
+  return { matchups, totalNetStrokes, avgCompetitiveness, unpairedPlayers };
 }

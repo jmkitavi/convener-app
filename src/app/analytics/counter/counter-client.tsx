@@ -436,20 +436,23 @@ export function CounterClient({
               <CardContent className="flex items-center gap-3">
                 <div
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
-                    result.totalNetStrokes >= 0
+                    result.avgCompetitiveness >= 0.5
                       ? "bg-emerald-100 text-emerald-700"
                       : "bg-red-100 text-red-700"
                   }`}
                 >
                   <span className="text-sm font-bold">
-                    {result.totalNetStrokes >= 0 ? "+" : ""}
-                    {result.totalNetStrokes}
+                    {(result.avgCompetitiveness * 100).toFixed(0)}
                   </span>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Net Stroke Advantage</p>
+                  <p className="text-xs text-muted-foreground">Avg Competitiveness</p>
                   <p className="text-lg font-semibold">
-                    {result.totalNetStrokes >= 0 ? "Favorable" : "Unfavorable"}
+                    {result.avgCompetitiveness >= 0.6
+                      ? "Strong"
+                      : result.avgCompetitiveness >= 0.45
+                        ? "Even"
+                        : "Tough"}
                   </p>
                 </div>
               </CardContent>
@@ -527,6 +530,14 @@ export function CounterClient({
                               <span className="text-xs text-emerald-600 ml-1">
                                 [{m.strokeAnalysis.ourPlayer1Strokes}]
                               </span>
+                              <span className="text-xs text-gray-500 ml-1">
+                                eff. {m.strokeAnalysis.ourPlayer1EffHcp}
+                              </span>
+                              {m.strokeAnalysis.ourPlayer1Deficit > 0 && (
+                                <span className="text-xs text-amber-600 ml-1">
+                                  ⚠ -{m.strokeAnalysis.ourPlayer1Deficit}
+                                </span>
+                              )}
                             </p>
                             <p className="font-semibold">
                               {m.ourPlayer2.name}{" "}
@@ -536,24 +547,34 @@ export function CounterClient({
                               <span className="text-xs text-emerald-600 ml-1">
                                 [{m.strokeAnalysis.ourPlayer2Strokes}]
                               </span>
+                              <span className="text-xs text-gray-500 ml-1">
+                                eff. {m.strokeAnalysis.ourPlayer2EffHcp}
+                              </span>
+                              {m.strokeAnalysis.ourPlayer2Deficit > 0 && (
+                                <span className="text-xs text-amber-600 ml-1">
+                                  ⚠ -{m.strokeAnalysis.ourPlayer2Deficit}
+                                </span>
+                              )}
                             </p>
                           </div>
 
-                          <div className="flex items-center gap-2 sm:gap-3">
+                          <div className="flex flex-col items-center gap-1 sm:gap-2">
                             <span className="text-sm font-medium text-muted-foreground">
                               vs
                             </span>
                             <div
-                              className={`rounded-lg px-3 py-1 text-center text-sm font-bold ${
-                                m.strokeAnalysis.netAdvantage > 0
+                              className={`rounded-lg px-3 py-1 text-center text-xs font-bold ${
+                                m.strokeAnalysis.bestVsBest > 1
                                   ? "bg-emerald-100 text-emerald-700"
-                                  : m.strokeAnalysis.netAdvantage < 0
+                                  : m.strokeAnalysis.bestVsBest < -1
                                     ? "bg-red-100 text-red-700"
                                     : "bg-gray-100 text-gray-700"
                               }`}
+                              title="Best vs Best effective handicap gap"
                             >
-                              {m.strokeAnalysis.netAdvantage > 0 ? "+" : ""}
-                              {m.strokeAnalysis.netAdvantage}
+                              {m.strokeAnalysis.bestVsBest > 0 ? "+" : ""}
+                              {m.strokeAnalysis.bestVsBest} / {m.strokeAnalysis.secondVsSecond > 0 ? "+" : ""}
+                              {m.strokeAnalysis.secondVsSecond}
                             </div>
                           </div>
 
@@ -569,6 +590,9 @@ export function CounterClient({
                               <span className="text-xs text-red-600 ml-1">
                                 [{m.strokeAnalysis.opp1Strokes}]
                               </span>
+                              <span className="text-xs text-gray-500 ml-1">
+                                eff. {m.strokeAnalysis.opp1EffHcp}
+                              </span>
                             </p>
                             <p className="font-semibold">
                               {m.opponent.opp2Name}{" "}
@@ -578,6 +602,9 @@ export function CounterClient({
                               <span className="text-xs text-red-600 ml-1">
                                 [{m.strokeAnalysis.opp2Strokes}]
                               </span>
+                              <span className="text-xs text-gray-500 ml-1">
+                                eff. {m.strokeAnalysis.opp2EffHcp}
+                              </span>
                             </p>
                           </div>
                         </div>
@@ -585,7 +612,7 @@ export function CounterClient({
                         {/* Score breakdown */}
                         <div className="space-y-1">
                           <ScoreBar
-                            label="Strokes"
+                            label="Competitive"
                             value={m.breakdown.strokeAdvantage}
                           />
                           <ScoreBar
