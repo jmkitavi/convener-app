@@ -7,7 +7,7 @@ import {
   opponentClubs,
   players,
 } from "@/db/schema";
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, asc, sql, or, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { revalidatePath } from "next/cache";
 import {
@@ -118,6 +118,41 @@ export default async function FixtureDetailPage({
   // Internal match = opponent club name contains "Kenya Airforce"
   const isInternalMatch = (fixture.clubName ?? "").includes("Kenya Airforce");
 
+  /** Update a player's defaultHandicap to their most recent match handicap */
+  async function syncPlayerHandicap(playerId: number) {
+    "use server";
+    const row = db
+      .select({
+        handicap: sql<number>`
+          CASE
+            WHEN ${matches.player1Id} = ${playerId} THEN ${matches.player1Handicap}
+            WHEN ${matches.player2Id} = ${playerId} THEN ${matches.player2Handicap}
+            WHEN ${matches.opponent1Id} = ${playerId} THEN ${matches.opponent1Handicap}
+            WHEN ${matches.opponent2Id} = ${playerId} THEN ${matches.opponent2Handicap}
+          END`,
+      })
+      .from(matches)
+      .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
+      .where(
+        or(
+          eq(matches.player1Id, playerId),
+          eq(matches.player2Id, playerId),
+          eq(matches.opponent1Id, playerId),
+          eq(matches.opponent2Id, playerId),
+        ),
+      )
+      .orderBy(desc(fixtures.date), desc(matches.id))
+      .limit(1)
+      .get();
+
+    if (row) {
+      await db
+        .update(players)
+        .set({ defaultHandicap: row.handicap })
+        .where(eq(players.id, playerId));
+    }
+  }
+
   async function createMatch(formData: FormData) {
     "use server";
 
@@ -141,6 +176,15 @@ export default async function FixtureDetailPage({
       margin: (formData.get("margin") as string) || null,
       notes: (formData.get("notes") as string) || null,
     });
+
+    // Sync handicaps for involved players
+    const playerIds = [
+      Number(formData.get("player1Id")),
+      Number(formData.get("player2Id")),
+      ...(o1Id ? [Number(o1Id)] : []),
+      ...(o2Id ? [Number(o2Id)] : []),
+    ];
+    await Promise.all(playerIds.map(syncPlayerHandicap));
 
     revalidatePath(`/fixtures/${fId}`);
     redirect(`/fixtures/${fId}`);
@@ -187,6 +231,15 @@ export default async function FixtureDetailPage({
         notes: (formData.get("notes") as string) || null,
       })
       .where(eq(matches.id, matchId));
+
+    // Sync handicaps for involved players
+    const playerIds = [
+      Number(formData.get("player1Id")),
+      Number(formData.get("player2Id")),
+      ...(o1Id ? [Number(o1Id)] : []),
+      ...(o2Id ? [Number(o2Id)] : []),
+    ];
+    await Promise.all(playerIds.map(syncPlayerHandicap));
 
     revalidatePath(`/fixtures/${fId}`);
     redirect(`/fixtures/${fId}`);
