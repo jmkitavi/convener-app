@@ -157,6 +157,8 @@ export function MatchForm({
             id="player1Handicap"
             type="number"
             step="0.1"
+            min="-8"
+            max="54"
             value={player1Handicap}
             onChange={(e) => setPlayer1Handicap(e.target.value)}
             required
@@ -188,6 +190,8 @@ export function MatchForm({
             id="player2Handicap"
             type="number"
             step="0.1"
+            min="-8"
+            max="54"
             value={player2Handicap}
             onChange={(e) => setPlayer2Handicap(e.target.value)}
             required
@@ -231,6 +235,8 @@ export function MatchForm({
             id="opponent1Handicap"
             type="number"
             step="0.1"
+            min="-8"
+            max="54"
             value={opponent1Handicap}
             onChange={(e) => setOpponent1Handicap(e.target.value)}
             required
@@ -271,6 +277,8 @@ export function MatchForm({
             id="opponent2Handicap"
             type="number"
             step="0.1"
+            min="-8"
+            max="54"
             value={opponent2Handicap}
             onChange={(e) => setOpponent2Handicap(e.target.value)}
             required

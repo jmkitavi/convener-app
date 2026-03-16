@@ -69,7 +69,7 @@ export function PlayerForm({
           type="number"
           required
           step="0.1"
-          min="0"
+          min="-8"
           max="54"
           defaultValue={defaultValues?.defaultHandicap ?? 18}
         />
