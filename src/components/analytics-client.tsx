@@ -24,7 +24,7 @@ import {
   type MatchWithDetails,
 } from "@/lib/analytics";
 
-const INTERNAL_CLUB_IDS = new Set([16, 17]);
+const INTERNAL_CLUB_IDS = new Set([15]);
 
 type DataMode = "ndc" | "all";
 

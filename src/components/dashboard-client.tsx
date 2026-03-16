@@ -26,7 +26,7 @@ import {
 } from "@/lib/analytics";
 
 // Internal/friendly fixture club IDs (not NDC league matches)
-const INTERNAL_CLUB_IDS = new Set([16, 17]);
+const INTERNAL_CLUB_IDS = new Set([15]);
 
 type DataMode = "ndc" | "all";
 
