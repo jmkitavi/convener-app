@@ -247,7 +247,7 @@ export function SuggestClient({
                           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">
                             {i + 1}
                           </span>
-                          {s.player1.name} &amp; {s.player2.name}
+                          {s.player1.name} ({s.player1.handicap}) &amp; {s.player2.name} ({s.player2.handicap})
                         </CardTitle>
                         <CardDescription>
                           {s.matchesPlayed > 0
