@@ -397,7 +397,37 @@ Royal's lineup for 15 Mar 2026 (16 pairs, saved as lineup #1):
 
 - Scoring engine: `src/lib/pairing-engine.ts`
   - `calculateStrokeAnalysis()` — stroke allocation and effective handicaps
-  - `scoreStrokeAdvantage()` — current scoring (to be replaced)
-  - `suggestCounterPairings()` — greedy assignment algorithm
+  - `scoreCompetitiveness()` — 4BBB pair-vs-pair spread metric (replaced raw 4-player spread)
+  - `scorePartnerBalance()` — penalizes extreme handicap gaps within a pair
+  - `suggestCounterPairings()` — greedy assignment algorithm with concede-and-focus strategy
 - Counter-pairing UI: `src/app/analytics/counter/counter-client.tsx`
 - Server actions: `src/lib/actions.ts` (saveLineup, getLineups, etc.)
+
+## Appendix D: Engine Scoring Model v2 (4BBB-aware)
+
+### Spread Metric Change (v2)
+- **Old**: `max(all 4 effective hcps) - min(all 4 effective hcps)` — penalized having a very strong (plus) player
+- **New**: `max(|bestVsBest|, |secondVsSecond|)` — compares how each pair's best and second balls match up
+- This is what matters in Four Ball Better Ball: how your best ball competes against their best ball
+
+### Partner Balance (new in v2)
+- Gap ≤4: 1.0 (ideal), ≤8: 0.7, ≤12: 0.4, ≤18: 0.2, >18: 0.0 (extreme)
+- Weight: 0.15 — prevents pairing a scratch golfer with a 24 handicapper
+- Wide partner gap (>12) produces a warning badge in reasoning
+
+### Updated Weights (v2)
+| Factor | Weight | Notes |
+|--------|--------|-------|
+| Competitiveness (4BBB spread) | 0.35 | Was 0.40 |
+| Historical win rate | 0.20 | Was 0.25 |
+| Recent form | 0.10 | Was 0.15 |
+| Venue affinity | 0.10 | Unchanged |
+| Band coherence | 0.05 | Unchanged |
+| Player strength | 0.05 | Unchanged |
+| **Partner balance** | **0.15** | **New** |
+
+### Tier Thresholds (unchanged)
+- Target win: spread ≤ 2.0
+- Target half: spread ≤ 3.0
+- Competitive: spread ≤ 4.0
+- Concede: spread > 4.0
