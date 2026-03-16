@@ -157,13 +157,19 @@ export default async function FixtureDetailPage({
     "use server";
 
     const fId = Number(formData.get("fixtureId"));
+    const p1Id = Number(formData.get("player1Id"));
+    const p2Id = Number(formData.get("player2Id"));
     const o1Id = formData.get("opponent1Id");
     const o2Id = formData.get("opponent2Id");
 
+    if (!p1Id || !p2Id) {
+      throw new Error("Both players must be selected");
+    }
+
     await db.insert(matches).values({
       fixtureId: fId,
-      player1Id: Number(formData.get("player1Id")),
-      player2Id: Number(formData.get("player2Id")),
+      player1Id: p1Id,
+      player2Id: p2Id,
       player1Handicap: Number(formData.get("player1Handicap")),
       player2Handicap: Number(formData.get("player2Handicap")),
       opponent1Name: formData.get("opponent1Name") as string,
@@ -179,8 +185,8 @@ export default async function FixtureDetailPage({
 
     // Sync handicaps for involved players
     const playerIds = [
-      Number(formData.get("player1Id")),
-      Number(formData.get("player2Id")),
+      p1Id,
+      p2Id,
       ...(o1Id ? [Number(o1Id)] : []),
       ...(o2Id ? [Number(o2Id)] : []),
     ];
@@ -207,14 +213,20 @@ export default async function FixtureDetailPage({
 
     const matchId = Number(formData.get("matchId"));
     const fId = Number(formData.get("fixtureId"));
+    const p1Id = Number(formData.get("player1Id"));
+    const p2Id = Number(formData.get("player2Id"));
     const o1Id = formData.get("opponent1Id");
     const o2Id = formData.get("opponent2Id");
+
+    if (!p1Id || !p2Id) {
+      throw new Error("Both players must be selected");
+    }
 
     await db
       .update(matches)
       .set({
-        player1Id: Number(formData.get("player1Id")),
-        player2Id: Number(formData.get("player2Id")),
+        player1Id: p1Id,
+        player2Id: p2Id,
         player1Handicap: Number(formData.get("player1Handicap")),
         player2Handicap: Number(formData.get("player2Handicap")),
         opponent1Name: formData.get("opponent1Name") as string,
@@ -234,8 +246,8 @@ export default async function FixtureDetailPage({
 
     // Sync handicaps for involved players
     const playerIds = [
-      Number(formData.get("player1Id")),
-      Number(formData.get("player2Id")),
+      p1Id,
+      p2Id,
       ...(o1Id ? [Number(o1Id)] : []),
       ...(o2Id ? [Number(o2Id)] : []),
     ];
