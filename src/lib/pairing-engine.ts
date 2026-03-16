@@ -390,6 +390,7 @@ export type CounterMatchup = {
     venueAffinity: number;
     bandCoherence: number;
     playerStrength: number;
+    partnerBalance: number;
   };
   strokeAnalysis: StrokeAnalysis;
   effectiveSpread: number;
@@ -409,12 +410,13 @@ const MUST_PLAY_THRESHOLD = 14; // handicap < 14 must always be drafted
 const BENCH_THRESHOLD = 21; // handicap >= 21 only drafted when stronger players exhausted
 
 const COUNTER_WEIGHTS = {
-  competitiveness: 0.40,
-  historicalWinRate: 0.25,
-  recentForm: 0.15,
+  competitiveness: 0.35,
+  historicalWinRate: 0.20,
+  recentForm: 0.10,
   venueAffinity: 0.10,
   bandCoherence: 0.05,
   playerStrength: 0.05,
+  partnerBalance: 0.15,
 } as const;
 
 /**
@@ -486,9 +488,15 @@ function calculateStrokeAnalysis(
 }
 
 /**
- * Score competitiveness based on effective spread after stroke allocation.
- * Lower effective spread = more competitive match = higher score.
- * Also penalizes stroke deficits on our players.
+ * Score competitiveness using a 4BBB-aware metric.
+ *
+ * Instead of raw 4-player spread (max−min of all effective hcps), we use a
+ * **pair-vs-pair gap** that compares each pair's best and second balls:
+ *   effectiveSpread = max(|bestVsBest|, |secondVsSecond|)
+ *
+ * This correctly handles plus/scratch handicappers — a −2.5 player paired with
+ * a 23.6 creates a huge raw spread but may actually be very competitive in 4BBB
+ * because the pair's best ball dominates.
  *
  * Scoring bands (based on match analysis — see PAIRING-ANALYSIS.md):
  *   Spread 0–1.5: excellent (0.85–1.0)
@@ -501,14 +509,11 @@ function scoreCompetitiveness(analysis: StrokeAnalysis): {
   score: number;
   effectiveSpread: number;
 } {
-  const allEff = [
-    analysis.ourPlayer1EffHcp,
-    analysis.ourPlayer2EffHcp,
-    analysis.opp1EffHcp,
-    analysis.opp2EffHcp,
-  ];
+  // 4BBB pair-vs-pair gap: how each pair's best/second ball compare
+  const bestGap = Math.abs(analysis.bestVsBest);
+  const secondGap = Math.abs(analysis.secondVsSecond);
   const effectiveSpread =
-    Math.round((Math.max(...allEff) - Math.min(...allEff)) * 10) / 10;
+    Math.round(Math.max(bestGap, secondGap) * 10) / 10;
 
   // Piecewise linear mapping: spread → base score
   let base: number;
@@ -522,22 +527,9 @@ function scoreCompetitiveness(analysis: StrokeAnalysis): {
     base = Math.max(0, 0.25 - ((effectiveSpread - 5.0) / 10.0) * 0.25); // 0.25 → 0
   }
 
-  // Also factor in directional advantage: are OUR effective hcps lower (better)?
-  const ourBestEff = Math.min(
-    analysis.ourPlayer1EffHcp,
-    analysis.ourPlayer2EffHcp,
-  );
-  const oppBestEff = Math.min(analysis.opp1EffHcp, analysis.opp2EffHcp);
-  const ourSecondEff = Math.max(
-    analysis.ourPlayer1EffHcp,
-    analysis.ourPlayer2EffHcp,
-  );
-  const oppSecondEff = Math.max(analysis.opp1EffHcp, analysis.opp2EffHcp);
-  // Small bonus/penalty based on who has the edge (±0.1)
+  // Directional advantage: positive bestVsBest/secondVsSecond = our advantage
   const dirAdv =
-    ((oppBestEff - ourBestEff) * 0.6 +
-      (oppSecondEff - ourSecondEff) * 0.4) /
-    10;
+    (analysis.bestVsBest * 0.6 + analysis.secondVsSecond * 0.4) / 10;
   base += Math.max(-0.1, Math.min(0.1, dirAdv));
 
   // Deficit penalty: subtract 0.1 per stroke of deficit on our players
@@ -579,6 +571,20 @@ function scorePlayerStrength(ourH1: number, ourH2: number): number {
   return Math.max(0, Math.min(1, 1 - combined / 60));
 }
 
+/**
+ * Score partner balance — penalize extreme handicap gaps within our pair.
+ * In 4BBB, if partners are too far apart, the weaker player becomes dead weight
+ * and the stronger player carries alone. Close partners both contribute.
+ */
+function scorePartnerBalance(ourH1: number, ourH2: number): number {
+  const gap = Math.abs(ourH1 - ourH2);
+  if (gap <= 4) return 1.0;   // Close partners — both contribute
+  if (gap <= 8) return 0.7;   // Moderate gap — acceptable
+  if (gap <= 12) return 0.4;  // Wide gap — weaker player marginal
+  if (gap <= 18) return 0.2;  // Very wide — one player carries
+  return 0.0;                 // Extreme — essentially solo play
+}
+
 function generateCounterReasoning(
   strokeAnalysis: StrokeAnalysis,
   effectiveSpread: number,
@@ -596,6 +602,8 @@ function generateCounterReasoning(
   venueName: string | undefined,
   p1Name: string,
   p2Name: string,
+  p1Handicap: number,
+  p2Handicap: number,
 ): string[] {
   const reasons: string[] = [];
 
@@ -636,6 +644,12 @@ function generateCounterReasoning(
   }
   if (deficits.length > 0) {
     reasons.push(`⚠ ${deficits.join(", ")}`);
+  }
+
+  // Partner balance warning
+  const partnerGap = Math.abs(p1Handicap - p2Handicap);
+  if (partnerGap > 12) {
+    reasons.push(`⚠ Wide partner gap (${partnerGap.toFixed(1)} strokes)`);
   }
 
   if (isRedMatch) {
@@ -776,6 +790,8 @@ export function suggestCounterPairings(
       venueName,
     );
 
+    const partnerBalanceScore = scorePartnerBalance(p1.handicap, p2.handicap);
+
     const breakdown = {
       competitiveness: Math.round(compScore * 1000) / 1000,
       historicalWinRate: Math.round(winRateScore * 1000) / 1000,
@@ -783,6 +799,7 @@ export function suggestCounterPairings(
       venueAffinity: Math.round(venueResult.score * 1000) / 1000,
       bandCoherence: Math.round(bandScore * 1000) / 1000,
       playerStrength: Math.round(scorePlayerStrength(p1.handicap, p2.handicap) * 1000) / 1000,
+      partnerBalance: Math.round(partnerBalanceScore * 1000) / 1000,
     };
 
     const totalScore =
@@ -791,7 +808,8 @@ export function suggestCounterPairings(
       breakdown.recentForm * COUNTER_WEIGHTS.recentForm +
       breakdown.venueAffinity * COUNTER_WEIGHTS.venueAffinity +
       breakdown.bandCoherence * COUNTER_WEIGHTS.bandCoherence +
-      breakdown.playerStrength * COUNTER_WEIGHTS.playerStrength;
+      breakdown.playerStrength * COUNTER_WEIGHTS.playerStrength +
+      breakdown.partnerBalance * COUNTER_WEIGHTS.partnerBalance;
 
     const tier = classifyTier(effectiveSpread);
 
@@ -827,8 +845,9 @@ export function suggestCounterPairings(
           opp.opp2Handicap,
           opp.isRedMatch,
         );
-        const allEff = [sa.ourPlayer1EffHcp, sa.ourPlayer2EffHcp, sa.opp1EffHcp, sa.opp2EffHcp];
-        const spread = Math.max(...allEff) - Math.min(...allEff);
+        const bestGap = Math.abs(sa.bestVsBest);
+        const secondGap = Math.abs(sa.secondVsSecond);
+        const spread = Math.max(bestGap, secondGap);
         if (spread < bestSpread) bestSpread = spread;
       }
     }
@@ -921,6 +940,8 @@ export function suggestCounterPairings(
         venueName,
         bestPair[0].name,
         bestPair[1].name,
+        bestPair[0].handicap,
+        bestPair[1].handicap,
       );
       matchups.push({
         matchNumber: opp.originalIndex + 1,
@@ -997,6 +1018,8 @@ export function suggestCounterPairings(
         venueName,
         m.ourPlayer1.name,
         m.ourPlayer2.name,
+        m.ourPlayer1.handicap,
+        m.ourPlayer2.handicap,
       );
     }
   }
