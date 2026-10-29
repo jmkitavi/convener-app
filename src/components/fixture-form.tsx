@@ -31,6 +31,9 @@ export function FixtureForm({
     opponentClubId?: number;
     homeAway?: string;
     notes?: string;
+    venueName?: string | null;
+    teamName?: string | null;
+    opponentTeamName?: string | null;
   };
   submitLabel?: string;
 }) {
@@ -92,8 +95,23 @@ export function FixtureForm({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Venue is derived automatically: Home → Kenya Airforce Golf Club, Away → opponent&apos;s club
+          When venue is blank: Home → Kenya Air Force Golf Club, Away/Neutral → opponent&apos;s club.
         </p>
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor="venueName">Venue (optional)</Label>
+        <Input id="venueName" name="venueName" defaultValue={defaultValues?.venueName ?? ""} placeholder="Independent course or venue" />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="teamName">Our team (optional)</Label>
+          <Input id="teamName" name="teamName" defaultValue={defaultValues?.teamName ?? ""} />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="opponentTeamName">Opponent team (optional)</Label>
+          <Input id="opponentTeamName" name="opponentTeamName" defaultValue={defaultValues?.opponentTeamName ?? ""} />
+        </div>
       </div>
 
       <div className="grid gap-2">

@@ -21,6 +21,7 @@ import {
   getTeamRecord,
   getPairingStats,
   getVenueStats,
+  isCompletedMatch,
   type MatchWithDetails,
 } from "@/lib/analytics";
 
@@ -69,8 +70,9 @@ export function AnalyticsClient({
   const [mode, setMode] = useState<DataMode>("ndc");
 
   const matches = useMemo(() => {
-    if (mode === "all") return allMatches;
-    return allMatches.filter((m) => !INTERNAL_CLUB_IDS.has(m.opponentClubId));
+    const completed = allMatches.filter(isCompletedMatch);
+    if (mode === "all") return completed;
+    return completed.filter((m) => !INTERNAL_CLUB_IDS.has(m.opponentClubId));
   }, [allMatches, mode]);
 
   const teamRecord = useMemo(() => getTeamRecord(matches), [matches]);

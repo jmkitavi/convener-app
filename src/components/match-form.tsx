@@ -37,12 +37,12 @@ export function MatchForm({
   defaultValues?: {
     player1Id?: number;
     player2Id?: number;
-    player1Handicap?: number;
-    player2Handicap?: number;
+    player1Handicap?: number | null;
+    player2Handicap?: number | null;
     opponent1Name?: string;
     opponent2Name?: string;
-    opponent1Handicap?: number;
-    opponent2Handicap?: number;
+    opponent1Handicap?: number | null;
+    opponent2Handicap?: number | null;
     opponent1Id?: number | null;
     opponent2Id?: number | null;
     result?: string;
@@ -60,12 +60,6 @@ export function MatchForm({
     : undefined;
   const defaultP2 = defaultValues?.player2Id
     ? players.find((p) => p.id === defaultValues.player2Id)
-    : undefined;
-  const defaultO1 = defaultValues?.opponent1Id
-    ? players.find((p) => p.id === defaultValues.opponent1Id)
-    : undefined;
-  const defaultO2 = defaultValues?.opponent2Id
-    ? players.find((p) => p.id === defaultValues.opponent2Id)
     : undefined;
 
   const [player1Id, setPlayer1Id] = useState<number | null>(
@@ -109,6 +103,10 @@ export function MatchForm({
   const [result, setResult] = useState<string | null>(
     defaultValues?.result ?? null,
   );
+  const selectedP1 = players.find((player) => player.id === player1Id);
+  const selectedP2 = players.find((player) => player.id === player2Id);
+  const selectedO1 = players.find((player) => player.id === opponent1Id);
+  const selectedO2 = players.find((player) => player.id === opponent2Id);
 
   return (
     <form
@@ -133,6 +131,9 @@ export function MatchForm({
       className="grid gap-4"
     >
       <p className="text-sm font-medium">Our Pair</p>
+      <p className="text-xs text-muted-foreground">
+        Leave unknown handicaps blank. Current player defaults are suggestions only; apply them explicitly if they match this result.
+      </p>
       <div className="grid grid-cols-[1fr_5rem] gap-3">
         <div className="grid gap-2">
           <Label>Player 1</Label>
@@ -142,8 +143,8 @@ export function MatchForm({
             onChange={(val, player) => {
               setPlayer1Display(val);
               if (player) {
+                if (player.id !== player1Id) setPlayer1Handicap("");
                 setPlayer1Id(player.id);
-                setPlayer1Handicap(player.defaultHandicap.toString());
               } else {
                 setPlayer1Id(null);
               }
@@ -161,8 +162,13 @@ export function MatchForm({
             max="54"
             value={player1Handicap}
             onChange={(e) => setPlayer1Handicap(e.target.value)}
-            required
+            placeholder="Unknown"
           />
+          {selectedP1 && (
+            <button type="button" className="text-xs text-primary underline" onClick={() => setPlayer1Handicap(selectedP1.defaultHandicap.toString())}>
+              Use default ({selectedP1.defaultHandicap})
+            </button>
+          )}
         </div>
       </div>
 
@@ -175,8 +181,8 @@ export function MatchForm({
             onChange={(val, player) => {
               setPlayer2Display(val);
               if (player) {
+                if (player.id !== player2Id) setPlayer2Handicap("");
                 setPlayer2Id(player.id);
-                setPlayer2Handicap(player.defaultHandicap.toString());
               } else {
                 setPlayer2Id(null);
               }
@@ -194,8 +200,13 @@ export function MatchForm({
             max="54"
             value={player2Handicap}
             onChange={(e) => setPlayer2Handicap(e.target.value)}
-            required
+            placeholder="Unknown"
           />
+          {selectedP2 && (
+            <button type="button" className="text-xs text-primary underline" onClick={() => setPlayer2Handicap(selectedP2.defaultHandicap.toString())}>
+              Use default ({selectedP2.defaultHandicap})
+            </button>
+          )}
         </div>
       </div>
 
@@ -212,8 +223,8 @@ export function MatchForm({
               onChange={(val, player) => {
                 setOpponent1Name(val);
                 if (player) {
+                  if (player.id !== opponent1Id) setOpponent1Handicap("");
                   setOpponent1Id(player.id);
-                  setOpponent1Handicap(player.defaultHandicap.toString());
                 } else {
                   setOpponent1Id(null);
                 }
@@ -239,8 +250,13 @@ export function MatchForm({
             max="54"
             value={opponent1Handicap}
             onChange={(e) => setOpponent1Handicap(e.target.value)}
-            required
+            placeholder="Unknown"
           />
+          {selectedO1 && (
+            <button type="button" className="text-xs text-primary underline" onClick={() => setOpponent1Handicap(selectedO1.defaultHandicap.toString())}>
+              Use default ({selectedO1.defaultHandicap})
+            </button>
+          )}
         </div>
       </div>
 
@@ -254,8 +270,8 @@ export function MatchForm({
               onChange={(val, player) => {
                 setOpponent2Name(val);
                 if (player) {
+                  if (player.id !== opponent2Id) setOpponent2Handicap("");
                   setOpponent2Id(player.id);
-                  setOpponent2Handicap(player.defaultHandicap.toString());
                 } else {
                   setOpponent2Id(null);
                 }
@@ -281,8 +297,13 @@ export function MatchForm({
             max="54"
             value={opponent2Handicap}
             onChange={(e) => setOpponent2Handicap(e.target.value)}
-            required
+            placeholder="Unknown"
           />
+          {selectedO2 && (
+            <button type="button" className="text-xs text-primary underline" onClick={() => setOpponent2Handicap(selectedO2.defaultHandicap.toString())}>
+              Use default ({selectedO2.defaultHandicap})
+            </button>
+          )}
         </div>
       </div>
 

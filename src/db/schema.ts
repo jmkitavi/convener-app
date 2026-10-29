@@ -24,6 +24,9 @@ export const fixtures = sqliteTable("fixtures", {
   opponentClubId: integer("opponent_club_id").notNull().references(() => opponentClubs.id),
   homeAway: text("home_away", { enum: ["home", "away", "neutral"] }).notNull().default("home"),
   notes: text("notes"),
+  venueName: text("venue_name"),
+  teamName: text("team_name"),
+  opponentTeamName: text("opponent_team_name"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
@@ -32,18 +35,28 @@ export const matches = sqliteTable("matches", {
   fixtureId: integer("fixture_id").notNull().references(() => fixtures.id, { onDelete: "cascade" }),
   player1Id: integer("player1_id").notNull().references(() => players.id),
   player2Id: integer("player2_id").notNull().references(() => players.id),
-  player1Handicap: real("player1_handicap").notNull(),
-  player2Handicap: real("player2_handicap").notNull(),
+  player1Handicap: real("player1_handicap"),
+  player2Handicap: real("player2_handicap"),
   opponent1Name: text("opponent1_name").notNull(),
   opponent2Name: text("opponent2_name").notNull(),
-  opponent1Handicap: real("opponent1_handicap").notNull(),
-  opponent2Handicap: real("opponent2_handicap").notNull(),
+  opponent1Handicap: real("opponent1_handicap"),
+  opponent2Handicap: real("opponent2_handicap"),
   opponent1Id: integer("opponent1_id").references(() => players.id),
   opponent2Id: integer("opponent2_id").references(() => players.id),
   result: text("result", { enum: ["win", "loss", "halved", "pending"] }).notNull(),
   margin: text("margin"),
   matchOrder: integer("match_order"),
   notes: text("notes"),
+});
+
+export const resultImports = sqliteTable("result_imports", {
+  id: text("id").primaryKey(),
+  status: text("status").notNull(),
+  data: text("data").notNull(),
+  sourceHash: text("source_hash").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+  commitResult: text("commit_result"),
 });
 
 export const opponentLineups = sqliteTable("opponent_lineups", {

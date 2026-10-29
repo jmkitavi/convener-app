@@ -7,7 +7,7 @@ import {
   opponentClubs,
   players,
 } from "@/db/schema";
-import { eq, asc, sql, or, desc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { revalidatePath } from "next/cache";
 import {
@@ -31,6 +31,8 @@ import {
 import { Plus, Calendar, MapPin, Pencil, Trash2 } from "lucide-react";
 import { MatchForm } from "@/components/match-form";
 import { FixtureForm } from "@/components/fixture-form";
+import { parseMatchHandicap, syncPlayerHandicaps } from "@/lib/handicaps";
+import { calcFixturePoints } from "@/lib/analytics";
 
 export default async function FixtureDetailPage({
   params,
@@ -47,8 +49,11 @@ export default async function FixtureDetailPage({
       opponentClubId: fixtures.opponentClubId,
       homeAway: fixtures.homeAway,
       notes: fixtures.notes,
+      teamName: fixtures.teamName,
+      opponentTeamName: fixtures.opponentTeamName,
+      explicitVenueName: fixtures.venueName,
       clubName: opponentClubs.name,
-      venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
+      venueName: sql<string>`COALESCE(NULLIF(TRIM(${fixtures.venueName}), ''), CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Air Force Golf Club' ELSE ${opponentClubs.name} END)`.as("venue_name"),
     })
     .from(fixtures)
     .leftJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
@@ -92,7 +97,6 @@ export default async function FixtureDetailPage({
       defaultHandicap: players.defaultHandicap,
     })
     .from(players)
-    .where(eq(players.active, true))
     .orderBy(players.name);
 
   const clubs = await db
@@ -108,50 +112,10 @@ export default async function FixtureDetailPage({
 
   // Points calculation
   const decidedMatches = wins + losses + halved;
-  const totalMatches = matchList.length;
-  const ppm = totalMatches > 0 ? Math.round(Math.min(30 / totalMatches, 2) * 100) / 100 : 0;
-  const teamPoints = totalMatches > 0
-    ? Math.min(Math.round((wins * ppm + halved * ppm * 0.5) * 100) / 100, Math.min(totalMatches * ppm, 30))
-    : 0;
-  const maxPoints = totalMatches > 0 ? Math.min(Math.round(totalMatches * ppm * 100) / 100, 30) : 0;
+  const { pointsPerMatch: ppm, teamPoints, maxPoints } = calcFixturePoints(decidedMatches, wins, halved);
 
-  // Internal match = opponent club name contains "Kenya Airforce"
-  const isInternalMatch = (fixture.clubName ?? "").includes("Kenya Airforce");
-
-  /** Update a player's defaultHandicap to their most recent match handicap */
-  async function syncPlayerHandicap(playerId: number) {
-    "use server";
-    const row = db
-      .select({
-        handicap: sql<number>`
-          CASE
-            WHEN ${matches.player1Id} = ${playerId} THEN ${matches.player1Handicap}
-            WHEN ${matches.player2Id} = ${playerId} THEN ${matches.player2Handicap}
-            WHEN ${matches.opponent1Id} = ${playerId} THEN ${matches.opponent1Handicap}
-            WHEN ${matches.opponent2Id} = ${playerId} THEN ${matches.opponent2Handicap}
-          END`,
-      })
-      .from(matches)
-      .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
-      .where(
-        or(
-          eq(matches.player1Id, playerId),
-          eq(matches.player2Id, playerId),
-          eq(matches.opponent1Id, playerId),
-          eq(matches.opponent2Id, playerId),
-        ),
-      )
-      .orderBy(desc(fixtures.date), desc(matches.id))
-      .limit(1)
-      .get();
-
-    if (row) {
-      await db
-        .update(players)
-        .set({ defaultHandicap: row.handicap })
-        .where(eq(players.id, playerId));
-    }
-  }
+  const isInternalMatch = /Kenya Air\s*force/i.test(fixture.clubName ?? "") ||
+    matchList.some((match) => match.opponent1Id !== null || match.opponent2Id !== null);
 
   async function createMatch(formData: FormData) {
     "use server";
@@ -170,15 +134,16 @@ export default async function FixtureDetailPage({
       fixtureId: fId,
       player1Id: p1Id,
       player2Id: p2Id,
-      player1Handicap: Number(formData.get("player1Handicap")),
-      player2Handicap: Number(formData.get("player2Handicap")),
+      player1Handicap: parseMatchHandicap(formData.get("player1Handicap")),
+      player2Handicap: parseMatchHandicap(formData.get("player2Handicap")),
       opponent1Name: formData.get("opponent1Name") as string,
       opponent2Name: formData.get("opponent2Name") as string,
-      opponent1Handicap: Number(formData.get("opponent1Handicap")),
-      opponent2Handicap: Number(formData.get("opponent2Handicap")),
+      opponent1Handicap: parseMatchHandicap(formData.get("opponent1Handicap")),
+      opponent2Handicap: parseMatchHandicap(formData.get("opponent2Handicap")),
       opponent1Id: o1Id ? Number(o1Id) : null,
       opponent2Id: o2Id ? Number(o2Id) : null,
-      result: formData.get("result") as "win" | "loss" | "halved",
+      result: formData.get("result") as "win" | "loss" | "halved" | "pending",
+      matchOrder: formData.get("matchOrder") ? Number(formData.get("matchOrder")) : null,
       margin: (formData.get("margin") as string) || null,
       notes: (formData.get("notes") as string) || null,
     });
@@ -190,7 +155,7 @@ export default async function FixtureDetailPage({
       ...(o1Id ? [Number(o1Id)] : []),
       ...(o2Id ? [Number(o2Id)] : []),
     ];
-    await Promise.all(playerIds.map(syncPlayerHandicap));
+    syncPlayerHandicaps(db.$client, playerIds);
 
     revalidatePath(`/fixtures/${fId}`);
     redirect(`/fixtures/${fId}`);
@@ -202,7 +167,12 @@ export default async function FixtureDetailPage({
     const matchId = Number(formData.get("matchId"));
     const fId = Number(formData.get("fixtureId"));
 
+    const previous = db.select().from(matches).where(eq(matches.id, matchId)).get();
     await db.delete(matches).where(eq(matches.id, matchId));
+    if (previous) syncPlayerHandicaps(db.$client, [
+      previous.player1Id, previous.player2Id,
+      ...[previous.opponent1Id, previous.opponent2Id].filter((id): id is number => id !== null),
+    ]);
 
     revalidatePath(`/fixtures/${fId}`);
     redirect(`/fixtures/${fId}`);
@@ -222,17 +192,18 @@ export default async function FixtureDetailPage({
       throw new Error("Both players must be selected");
     }
 
+    const previous = db.select().from(matches).where(eq(matches.id, matchId)).get();
     await db
       .update(matches)
       .set({
         player1Id: p1Id,
         player2Id: p2Id,
-        player1Handicap: Number(formData.get("player1Handicap")),
-        player2Handicap: Number(formData.get("player2Handicap")),
+        player1Handicap: parseMatchHandicap(formData.get("player1Handicap")),
+        player2Handicap: parseMatchHandicap(formData.get("player2Handicap")),
         opponent1Name: formData.get("opponent1Name") as string,
         opponent2Name: formData.get("opponent2Name") as string,
-        opponent1Handicap: Number(formData.get("opponent1Handicap")),
-        opponent2Handicap: Number(formData.get("opponent2Handicap")),
+        opponent1Handicap: parseMatchHandicap(formData.get("opponent1Handicap")),
+        opponent2Handicap: parseMatchHandicap(formData.get("opponent2Handicap")),
         opponent1Id: o1Id ? Number(o1Id) : null,
         opponent2Id: o2Id ? Number(o2Id) : null,
         result: formData.get("result") as "win" | "loss" | "halved" | "pending",
@@ -251,7 +222,10 @@ export default async function FixtureDetailPage({
       ...(o1Id ? [Number(o1Id)] : []),
       ...(o2Id ? [Number(o2Id)] : []),
     ];
-    await Promise.all(playerIds.map(syncPlayerHandicap));
+    if (previous) playerIds.push(...[
+      previous.player1Id, previous.player2Id, previous.opponent1Id, previous.opponent2Id,
+    ].filter((id): id is number => id !== null));
+    syncPlayerHandicaps(db.$client, playerIds);
 
     revalidatePath(`/fixtures/${fId}`);
     redirect(`/fixtures/${fId}`);
@@ -267,10 +241,13 @@ export default async function FixtureDetailPage({
       | "away"
       | "neutral";
     const notes = (formData.get("notes") as string) || null;
+    const venueName = (formData.get("venueName") as string)?.trim() || null;
+    const teamName = (formData.get("teamName") as string)?.trim() || null;
+    const opponentTeamName = (formData.get("opponentTeamName") as string)?.trim() || null;
 
     await db
       .update(fixtures)
-      .set({ date, opponentClubId, homeAway, notes })
+      .set({ date, opponentClubId, homeAway, notes, venueName, teamName, opponentTeamName })
       .where(eq(fixtures.id, fixtureId));
 
     revalidatePath("/fixtures");
@@ -299,7 +276,7 @@ export default async function FixtureDetailPage({
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">
-              vs {fixture.clubName ?? "Unknown Club"}
+              {fixture.teamName ? `${fixture.teamName} vs ` : "vs "}{fixture.opponentTeamName ?? fixture.clubName ?? "Unknown Club"}
             </h1>
             <Badge
               variant={
@@ -333,6 +310,8 @@ export default async function FixtureDetailPage({
           )}
         </div>
 
+        <div className="flex gap-2">
+        <Button variant="outline" size="sm" render={<Link href={`/fixtures/import?fixtureId=${fixtureId}`} />}>Import Results</Button>
         <Dialog>
           <DialogTrigger
             render={
@@ -357,11 +336,15 @@ export default async function FixtureDetailPage({
                 opponentClubId: fixture.opponentClubId,
                 homeAway: fixture.homeAway,
                 notes: fixture.notes ?? undefined,
+                venueName: fixture.explicitVenueName,
+                teamName: fixture.teamName,
+                opponentTeamName: fixture.opponentTeamName,
               }}
               submitLabel="Update Fixture"
             />
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Summary */}
@@ -449,12 +432,12 @@ export default async function FixtureDetailPage({
                         <Link href={`/players/${match.player1Id}`} className="underline-offset-2 hover:underline">
                           {match.player1Name ?? "?"}
                         </Link>{" "}
-                        ({match.player1Handicap})
+                        ({match.player1Handicap ?? "—"})
                         {" & "}
                         <Link href={`/players/${match.player2Id}`} className="underline-offset-2 hover:underline">
                           {match.player2Name ?? "?"}
                         </Link>{" "}
-                        ({match.player2Handicap})
+                        ({match.player2Handicap ?? "—"})
                       </span>
                       <span className="text-muted-foreground">vs</span>
                       <span>
@@ -465,7 +448,7 @@ export default async function FixtureDetailPage({
                         ) : (
                           match.opponent1Name
                         )}{" "}
-                        ({match.opponent1Handicap})
+                        ({match.opponent1Handicap ?? "—"})
                         {" & "}
                         {match.opponent2Id ? (
                           <Link href={`/players/${match.opponent2Id}`} className="underline-offset-2 hover:underline">
@@ -474,7 +457,7 @@ export default async function FixtureDetailPage({
                         ) : (
                           match.opponent2Name
                         )}{" "}
-                        ({match.opponent2Handicap})
+                        ({match.opponent2Handicap ?? "—"})
                       </span>
                     </div>
                     {match.notes && (

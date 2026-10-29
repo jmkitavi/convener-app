@@ -75,13 +75,13 @@ type MatchHistoryEntry = {
   opponentClubName: string;
   partnerId: number;
   partnerName: string;
-  playerHandicap: number;
-  partnerHandicap: number;
+  playerHandicap: number | null;
+  partnerHandicap: number | null;
   opponent1Name: string;
   opponent2Name: string;
-  opponent1Handicap: number;
-  opponent2Handicap: number;
-  result: "win" | "loss" | "halved";
+  opponent1Handicap: number | null;
+  opponent2Handicap: number | null;
+  result: "win" | "loss" | "halved" | "pending";
   margin: string | null;
 };
 
@@ -91,6 +91,7 @@ interface PlayerDetailClientProps {
   form: FormMatch[];
   venueStats: VenueRecord[];
   handicapTrend: HandicapPoint[];
+  handicapTrendExcluded: number;
   matchHistory: MatchHistoryEntry[];
   updatePlayer: (formData: FormData) => Promise<void>;
   togglePlayerActive: (formData: FormData) => Promise<void>;
@@ -102,7 +103,7 @@ const RESULT_COLORS = {
   halved: "#f59e0b",
 } as const;
 
-function ResultBadge({ result }: { result: "win" | "loss" | "halved" }) {
+function ResultBadge({ result }: { result: "win" | "loss" | "halved" | "pending" }) {
   const variant =
     result === "win"
       ? "default"
@@ -156,6 +157,7 @@ export function PlayerDetailClient({
   form,
   venueStats,
   handicapTrend,
+  handicapTrendExcluded,
   matchHistory,
   updatePlayer,
   togglePlayerActive,
@@ -251,7 +253,7 @@ export function PlayerDetailClient({
             <CardDescription>Season statistics and trends</CardDescription>
           </CardHeader>
           <CardContent>
-            {hasMatches ? (
+            {matchHistory.length > 0 ? (
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-muted-foreground">
@@ -313,6 +315,9 @@ export function PlayerDetailClient({
 
           {/* Overview tab: Handicap Trend + Recent Form */}
           <TabsContent value="overview" className="space-y-6">
+            <p className="text-xs text-muted-foreground">
+              Handicap trend excludes {handicapTrendExcluded} completed match{handicapTrendExcluded === 1 ? "" : "es"} with an unknown player handicap, and all pending results.
+            </p>
             {/* Handicap Trend Chart */}
             {handicapTrend.length > 1 && (
               <Card>
@@ -396,10 +401,10 @@ export function PlayerDetailClient({
                       {form.map((m) => (
                         <TableRow key={m.id}>
                           <TableCell>{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell>{m.opponentClubName}</TableCell>
+                          <TableCell>{m.opponentClubName}<span className="block text-xs text-muted-foreground">{m.venueName}</span></TableCell>
                           <TableCell>
                             <span className="font-medium">{player.name}</span>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap ?? "—"})</span>
                             {" / "}
                             <Link
                               href={`/players/${m.partnerId}`}
@@ -407,14 +412,14 @@ export function PlayerDetailClient({
                             >
                               {m.partnerName}
                             </Link>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap ?? "—"})</span>
                           </TableCell>
                           <TableCell>
                             {m.opponent1Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap ?? "—"})</span>
                             {" / "}
                             {m.opponent2Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap ?? "—"})</span>
                           </TableCell>
                           <TableCell>
                             <ResultBadge result={m.result} />
@@ -463,10 +468,10 @@ export function PlayerDetailClient({
                       {matchHistory.map((m) => (
                         <TableRow key={m.id}>
                           <TableCell className="text-xs">{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell className="text-xs">{m.opponentClubName}</TableCell>
+                          <TableCell className="text-xs">{m.opponentClubName}<span className="block text-xs text-muted-foreground">{m.venueName}</span></TableCell>
                           <TableCell>
                             <span className="font-medium">{player.name}</span>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap ?? "—"})</span>
                             {" / "}
                             <Link
                               href={`/players/${m.partnerId}`}
@@ -474,14 +479,14 @@ export function PlayerDetailClient({
                             >
                               {m.partnerName}
                             </Link>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap ?? "—"})</span>
                           </TableCell>
                           <TableCell>
                             {m.opponent1Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap ?? "—"})</span>
                             {" / "}
                             {m.opponent2Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap ?? "—"})</span>
                           </TableCell>
                           <TableCell>
                             <ResultBadge result={m.result} />
@@ -600,10 +605,10 @@ export function PlayerDetailClient({
                       {matchHistory.map((m) => (
                         <TableRow key={m.id}>
                           <TableCell>{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell>{m.opponentClubName}</TableCell>
+                          <TableCell>{m.opponentClubName}<span className="block text-xs text-muted-foreground">{m.venueName}</span></TableCell>
                           <TableCell>
                             <span className="font-medium">{player.name}</span>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap ?? "—"})</span>
                             {" / "}
                             <Link
                               href={`/players/${m.partnerId}`}
@@ -611,14 +616,14 @@ export function PlayerDetailClient({
                             >
                               {m.partnerName}
                             </Link>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap ?? "—"})</span>
                           </TableCell>
                           <TableCell>
                             {m.opponent1Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap ?? "—"})</span>
                             {" / "}
                             {m.opponent2Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap})</span>
+                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap ?? "—"})</span>
                           </TableCell>
                           <TableCell>
                             <ResultBadge result={m.result} />

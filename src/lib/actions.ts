@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { eq, desc, asc, and, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { syncPlayerHandicaps } from "@/lib/handicaps";
 
 type ActionResult<T = undefined> = T extends undefined
   ? { success: boolean; error?: string }
@@ -230,6 +231,9 @@ export async function createFixture(data: {
   date: string;
   opponentClubId: number;
   homeAway?: "home" | "away" | "neutral";
+  venueName?: string | null;
+  teamName?: string | null;
+  opponentTeamName?: string | null;
   notes?: string;
 }) {
   try {
@@ -239,6 +243,9 @@ export async function createFixture(data: {
         date: data.date,
         opponentClubId: data.opponentClubId,
         homeAway: data.homeAway ?? "home",
+        venueName: data.venueName?.trim() || null,
+        teamName: data.teamName?.trim() || null,
+        opponentTeamName: data.opponentTeamName?.trim() || null,
         notes: data.notes ?? null,
       })
       .returning()
@@ -256,13 +263,21 @@ export async function updateFixture(
     date?: string;
     opponentClubId?: number;
     homeAway?: "home" | "away" | "neutral";
+    venueName?: string | null;
+    teamName?: string | null;
+    opponentTeamName?: string | null;
     notes?: string | null;
   },
 ) {
   try {
     const result = db
       .update(fixtures)
-      .set(data)
+      .set({
+        ...data,
+        ...(data.venueName !== undefined ? { venueName: data.venueName?.trim() || null } : {}),
+        ...(data.teamName !== undefined ? { teamName: data.teamName?.trim() || null } : {}),
+        ...(data.opponentTeamName !== undefined ? { opponentTeamName: data.opponentTeamName?.trim() || null } : {}),
+      })
       .where(eq(fixtures.id, id))
       .returning()
       .get();
@@ -321,9 +336,12 @@ export async function getFixtureWithDetails(id: number) {
         opponentClubId: fixtures.opponentClubId,
         homeAway: fixtures.homeAway,
         notes: fixtures.notes,
+        teamName: fixtures.teamName,
+        opponentTeamName: fixtures.opponentTeamName,
+        explicitVenueName: fixtures.venueName,
         createdAt: fixtures.createdAt,
         opponentClubName: opponentClubs.name,
-        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
+        venueName: sql<string>`COALESCE(NULLIF(TRIM(${fixtures.venueName}), ''), CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Air Force Golf Club' ELSE ${opponentClubs.name} END)`.as("venue_name"),
         clubPar: opponentClubs.par,
         clubSlopeRating: opponentClubs.slopeRating,
         clubCourseRating: opponentClubs.courseRating,
@@ -348,9 +366,12 @@ export async function getFixturesWithDetails() {
         opponentClubId: fixtures.opponentClubId,
         homeAway: fixtures.homeAway,
         notes: fixtures.notes,
+        teamName: fixtures.teamName,
+        opponentTeamName: fixtures.opponentTeamName,
+        explicitVenueName: fixtures.venueName,
         createdAt: fixtures.createdAt,
         opponentClubName: opponentClubs.name,
-        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
+        venueName: sql<string>`COALESCE(NULLIF(TRIM(${fixtures.venueName}), ''), CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Air Force Golf Club' ELSE ${opponentClubs.name} END)`.as("venue_name"),
       })
       .from(fixtures)
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
@@ -364,6 +385,9 @@ export async function getFixturesWithDetails() {
       opponentClubId: number;
       homeAway: string;
       notes: string | null;
+      teamName: string | null;
+      opponentTeamName: string | null;
+      explicitVenueName: string | null;
       createdAt: string;
       opponentClubName: string;
       venueName: string;
@@ -379,13 +403,15 @@ export async function createMatch(data: {
   fixtureId: number;
   player1Id: number;
   player2Id: number;
-  player1Handicap: number;
-  player2Handicap: number;
+  player1Handicap: number | null;
+  player2Handicap: number | null;
   opponent1Name: string;
   opponent2Name: string;
-  opponent1Handicap: number;
-  opponent2Handicap: number;
-  result: "win" | "loss" | "halved";
+  opponent1Handicap: number | null;
+  opponent2Handicap: number | null;
+  opponent1Id?: number | null;
+  opponent2Id?: number | null;
+  result: "win" | "loss" | "halved" | "pending";
   margin?: string;
   matchOrder?: number;
   notes?: string;
@@ -403,6 +429,8 @@ export async function createMatch(data: {
         opponent2Name: data.opponent2Name,
         opponent1Handicap: data.opponent1Handicap,
         opponent2Handicap: data.opponent2Handicap,
+        opponent1Id: data.opponent1Id ?? null,
+        opponent2Id: data.opponent2Id ?? null,
         result: data.result,
         margin: data.margin ?? null,
         matchOrder: data.matchOrder ?? null,
@@ -410,6 +438,7 @@ export async function createMatch(data: {
       })
       .returning()
       .get();
+    syncPlayerHandicaps(db.$client, [data.player1Id, data.player2Id, data.opponent1Id, data.opponent2Id].filter((id): id is number => id != null));
     revalidatePath(`/fixtures/${data.fixtureId}`);
     revalidatePath("/fixtures");
     return { success: true, data: result };
@@ -423,19 +452,22 @@ export async function updateMatch(
   data: {
     player1Id?: number;
     player2Id?: number;
-    player1Handicap?: number;
-    player2Handicap?: number;
+    player1Handicap?: number | null;
+    player2Handicap?: number | null;
     opponent1Name?: string;
     opponent2Name?: string;
-    opponent1Handicap?: number;
-    opponent2Handicap?: number;
-    result?: "win" | "loss" | "halved";
+    opponent1Handicap?: number | null;
+    opponent2Handicap?: number | null;
+    opponent1Id?: number | null;
+    opponent2Id?: number | null;
+    result?: "win" | "loss" | "halved" | "pending";
     margin?: string | null;
     matchOrder?: number | null;
     notes?: string | null;
   },
 ) {
   try {
+    const previous = db.select().from(matches).where(eq(matches.id, id)).get();
     const result = db
       .update(matches)
       .set(data)
@@ -443,6 +475,9 @@ export async function updateMatch(
       .returning()
       .get();
     if (result) {
+      syncPlayerHandicaps(db.$client, [previous, result].flatMap((match) => match
+        ? [match.player1Id, match.player2Id, match.opponent1Id, match.opponent2Id].filter((id): id is number => id != null)
+        : []));
       revalidatePath(`/fixtures/${result.fixtureId}`);
     }
     revalidatePath("/fixtures");
@@ -455,12 +490,13 @@ export async function updateMatch(
 export async function deleteMatch(id: number) {
   try {
     const match = db
-      .select({ fixtureId: matches.fixtureId })
+      .select()
       .from(matches)
       .where(eq(matches.id, id))
       .get();
     db.delete(matches).where(eq(matches.id, id)).run();
     if (match) {
+      syncPlayerHandicaps(db.$client, [match.player1Id, match.player2Id, match.opponent1Id, match.opponent2Id].filter((id): id is number => id != null));
       revalidatePath(`/fixtures/${match.fixtureId}`);
     }
     revalidatePath("/fixtures");
@@ -500,6 +536,8 @@ export async function getMatchesByFixture(fixtureId: number) {
         opponent2Name: matches.opponent2Name,
         opponent1Handicap: matches.opponent1Handicap,
         opponent2Handicap: matches.opponent2Handicap,
+        opponent1Id: matches.opponent1Id,
+        opponent2Id: matches.opponent2Id,
         result: matches.result,
         margin: matches.margin,
         matchOrder: matches.matchOrder,
@@ -533,13 +571,15 @@ export async function getMatchesByPlayer(playerId: number) {
         opponent2Name: matches.opponent2Name,
         opponent1Handicap: matches.opponent1Handicap,
         opponent2Handicap: matches.opponent2Handicap,
+        opponent1Id: matches.opponent1Id,
+        opponent2Id: matches.opponent2Id,
         result: matches.result,
         margin: matches.margin,
         matchOrder: matches.matchOrder,
         notes: matches.notes,
         fixtureDate: fixtures.date,
         opponentClubName: opponentClubs.name,
-        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
+        venueName: sql<string>`COALESCE(NULLIF(TRIM(${fixtures.venueName}), ''), CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Air Force Golf Club' ELSE ${opponentClubs.name} END)`.as("venue_name"),
       })
       .from(matches)
       .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
@@ -548,6 +588,8 @@ export async function getMatchesByPlayer(playerId: number) {
         or(
           eq(matches.player1Id, playerId),
           eq(matches.player2Id, playerId),
+          eq(matches.opponent1Id, playerId),
+          eq(matches.opponent2Id, playerId),
         ),
       )
       .orderBy(desc(fixtures.date))
@@ -622,7 +664,7 @@ export async function getAllMatches() {
         homeAway: fixtures.homeAway,
         opponentClubId: fixtures.opponentClubId,
         opponentClubName: opponentClubs.name,
-        venueName: sql<string>`CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Airforce Golf Club' ELSE ${opponentClubs.name} END`.as("venue_name"),
+        venueName: sql<string>`COALESCE(NULLIF(TRIM(${fixtures.venueName}), ''), CASE WHEN ${fixtures.homeAway} = 'home' THEN 'Kenya Air Force Golf Club' ELSE ${opponentClubs.name} END)`.as("venue_name"),
       })
       .from(matches)
       .innerJoin(fixtures, eq(matches.fixtureId, fixtures.id))
