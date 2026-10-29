@@ -20,10 +20,13 @@ export default async function NewFixturePage() {
       | "away"
       | "neutral";
     const notes = (formData.get("notes") as string) || null;
+    const venueName = (formData.get("venueName") as string)?.trim() || null;
+    const teamName = (formData.get("teamName") as string)?.trim() || null;
+    const opponentTeamName = (formData.get("opponentTeamName") as string)?.trim() || null;
 
     const [row] = await db
       .insert(fixtures)
-      .values({ date, opponentClubId, homeAway, notes })
+      .values({ date, opponentClubId, homeAway, notes, venueName, teamName, opponentTeamName })
       .returning({ id: fixtures.id });
 
     revalidatePath("/fixtures");

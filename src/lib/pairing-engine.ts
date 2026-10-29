@@ -3,6 +3,7 @@ import {
   getPairingStats,
   getVenueStats,
   getPlayerForm,
+  isCompletedMatch,
 } from "@/lib/analytics";
 
 export type AvailablePlayer = {
@@ -96,6 +97,8 @@ function scoreVenueAffinity(
   venueName: string | undefined,
 ): { score: number; venueWins: number; venuePlayed: number } {
   if (!venueName) return { score: 0.5, venueWins: 0, venuePlayed: 0 };
+  pairMatches = pairMatches.filter(isCompletedMatch);
+  allMatches = allMatches.filter(isCompletedMatch);
 
   // First try: pair's record at this venue
   const pairVenueMatches = pairMatches.filter((m) => m.venueName === venueName);

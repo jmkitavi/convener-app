@@ -42,3 +42,5 @@ next-env.d.ts
 convener.db
 convener.db-wal
 convener.db-shm
+convener.db.backup-*
+/.results-imports/

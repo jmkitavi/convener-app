@@ -16,7 +16,7 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { getAllMatches } from "@/lib/actions";
-import { getHandicapMatchupStats } from "@/lib/analytics";
+import { getHandicapMatchupStats, hasCompleteHandicaps, isCompletedMatch } from "@/lib/analytics";
 import type { MatchWithDetails, HandicapBucket } from "@/lib/analytics";
 import { HandicapChart } from "./handicap-chart";
 
@@ -24,6 +24,8 @@ export default async function HandicapsPage() {
   const result = await getAllMatches();
   const allMatches = (result.data ?? []) as MatchWithDetails[];
   const buckets = getHandicapMatchupStats(allMatches);
+  const completed = allMatches.filter(isCompletedMatch);
+  const excluded = completed.filter((match) => !hasCompleteHandicaps(match)).length;
 
   return (
     <div className="space-y-6">
@@ -43,6 +45,10 @@ export default async function HandicapsPage() {
           </p>
         </div>
       </div>
+
+      <p className="text-sm text-muted-foreground">
+        Excludes {excluded} completed match{excluded === 1 ? "" : "es"} with unknown handicaps and all pending results.
+      </p>
 
       {allMatches.length === 0 ? (
         <Card>

@@ -11,6 +11,7 @@ import {
   isPlayerInMatch,
   isOnOpponentSide,
   effectiveResult,
+  getPlayerHandicapTrend,
   type MatchWithDetails,
 } from "@/lib/analytics";
 import { PlayerDetailClient } from "./player-detail-client";
@@ -84,32 +85,20 @@ export default async function PlayerDetailPage({
         new Date(a.fixtureDate).getTime() - new Date(b.fixtureDate).getTime()
     );
 
-  const handicapTrend = playerMatchesSorted.map((m) => {
-    const onOppSide = isOnOpponentSide(m, player.id);
-    let handicap: number;
-    if (onOppSide) {
-      handicap = m.opponent1Id === player.id ? m.opponent1Handicap : m.opponent2Handicap;
-    } else {
-      handicap = m.player1Id === player.id ? m.player1Handicap : m.player2Handicap;
-    }
-    return {
-      date: m.fixtureDate,
-      handicap,
-      result: effectiveResult(m, player.id),
-    };
-  });
+  const handicapTrend = getPlayerHandicapTrend(allMatches, player.id);
+  const handicapTrendExcluded = playerMatchesSorted.filter((m) => m.result !== "pending").length - handicapTrend.length;
 
   // Match history — newest first (includes opponent-side appearances)
   const matchHistory = [...playerMatchesSorted].reverse().map((m) => {
     const onOppSide = isOnOpponentSide(m, player.id);
     let partnerId: number;
     let partnerName: string;
-    let playerHandicap: number;
-    let partnerHandicap: number;
+    let playerHandicap: number | null;
+    let partnerHandicap: number | null;
     let opponent1Name: string;
     let opponent2Name: string;
-    let opponent1Handicap: number;
-    let opponent2Handicap: number;
+    let opponent1Handicap: number | null;
+    let opponent2Handicap: number | null;
 
     if (onOppSide) {
       partnerId = m.opponent1Id === player.id ? (m.opponent2Id ?? 0) : (m.opponent1Id ?? 0);
@@ -158,6 +147,7 @@ export default async function PlayerDetailPage({
       form={form}
       venueStats={venueStats}
       handicapTrend={handicapTrend}
+      handicapTrendExcluded={handicapTrendExcluded}
       matchHistory={matchHistory}
       updatePlayer={updatePlayer}
       togglePlayerActive={togglePlayerActive}

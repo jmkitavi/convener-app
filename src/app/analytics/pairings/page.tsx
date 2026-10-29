@@ -105,7 +105,12 @@ export default async function PairingsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        {p.avgCombinedHandicap}
+                        {p.avgCombinedHandicap ?? "—"}
+                        {p.handicapExcluded > 0 && (
+                          <span className="block text-xs text-muted-foreground">
+                            {p.handicapExcluded} unknown pair handicap{p.handicapExcluded === 1 ? "" : "s"} excluded
+                          </span>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

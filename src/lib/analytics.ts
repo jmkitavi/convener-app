@@ -3,21 +3,22 @@ export type MatchWithDetails = {
   fixtureId: number;
   player1Id: number;
   player2Id: number;
-  player1Handicap: number;
-  player2Handicap: number;
+  player1Handicap: number | null;
+  player2Handicap: number | null;
   opponent1Name: string;
   opponent2Name: string;
-  opponent1Handicap: number;
-  opponent2Handicap: number;
+  opponent1Handicap: number | null;
+  opponent2Handicap: number | null;
   opponent1Id: number | null;
   opponent2Id: number | null;
   opponent1PlayerName: string | null;
   opponent2PlayerName: string | null;
-  result: "win" | "loss" | "halved";
+  result: "win" | "loss" | "halved" | "pending";
   margin: string | null;
   matchOrder: number | null;
   notes: string | null;
   fixtureDate: string;
+  homeAway: "home" | "away" | "neutral";
   venueName: string;
   opponentClubId: number;
   opponentClubName: string;
@@ -61,7 +62,8 @@ export type PairingRecord = {
   losses: number;
   halved: number;
   winRate: number;
-  avgCombinedHandicap: number;
+  avgCombinedHandicap: number | null;
+  handicapExcluded: number;
 };
 
 export type VenueRecord = {
@@ -91,12 +93,12 @@ export type FormMatch = {
   opponentClubName: string;
   partnerId: number;
   partnerName: string;
-  playerHandicap: number;
-  partnerHandicap: number;
+  playerHandicap: number | null;
+  partnerHandicap: number | null;
   opponent1Name: string;
   opponent2Name: string;
-  opponent1Handicap: number;
-  opponent2Handicap: number;
+  opponent1Handicap: number | null;
+  opponent2Handicap: number | null;
   result: "win" | "loss" | "halved";
   margin: string | null;
   runningWinRate: number;
@@ -140,8 +142,8 @@ export function calcFixturePoints(
   const raw = 30 / totalMatches;
   const pointsPerMatch = Math.min(raw, 2);
   const ppm2 = Math.round(pointsPerMatch * 100) / 100;
-  const maxPoints = Math.min(Math.round(totalMatches * ppm2 * 100) / 100, 30);
-  const teamPoints = Math.min(Math.round((wins * ppm2 + halved * ppm2 * 0.5) * 100) / 100, maxPoints);
+  const maxPoints = Math.min(totalMatches * 2, 30);
+  const teamPoints = Math.min(Math.round((wins + halved * 0.5) * pointsPerMatch * 100) / 100, maxPoints);
   const opponentPoints = Math.round((maxPoints - teamPoints) * 100) / 100;
   return { pointsPerMatch: ppm2, teamPoints, opponentPoints, maxPoints };
 }
@@ -171,16 +173,46 @@ export function isOnOpponentSide(m: MatchWithDetails, playerId: number): boolean
   return m.opponent1Id === playerId || m.opponent2Id === playerId;
 }
 
-/** Get the result from a player's perspective (flipped if on opponent side) */
-export function effectiveResult(m: MatchWithDetails, playerId: number): "win" | "loss" | "halved" {
+type CompletedMatch = MatchWithDetails & { result: "win" | "loss" | "halved" };
+
+export function isCompletedMatch(m: MatchWithDetails): m is CompletedMatch {
+  return m.result !== "pending";
+}
+
+export function hasCompleteHandicaps(m: MatchWithDetails): boolean {
+  return m.player1Handicap !== null && m.player2Handicap !== null &&
+    m.opponent1Handicap !== null && m.opponent2Handicap !== null;
+}
+
+export function getPlayerHandicapTrend(matches: MatchWithDetails[], playerId: number) {
+  return matches.filter(isCompletedMatch)
+    .filter((m) => isPlayerInMatch(m, playerId))
+    .flatMap((m) => {
+      const handicap = isOnOpponentSide(m, playerId)
+        ? (m.opponent1Id === playerId ? m.opponent1Handicap : m.opponent2Handicap)
+        : (m.player1Id === playerId ? m.player1Handicap : m.player2Handicap);
+      return handicap === null ? [] : [{
+        date: m.fixtureDate,
+        handicap,
+        result: effectiveResult(m, playerId),
+      }];
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Get the result from a player's perspective (flipped if on opponent side). */
+export function effectiveResult(m: CompletedMatch, playerId: number): CompletedMatch["result"];
+export function effectiveResult(m: MatchWithDetails, playerId: number): MatchWithDetails["result"];
+export function effectiveResult(m: MatchWithDetails, playerId: number): MatchWithDetails["result"] {
   const flip = isOnOpponentSide(m, playerId);
   if (!flip) return m.result;
   if (m.result === "win") return "loss";
   if (m.result === "loss") return "win";
-  return "halved";
+  return m.result;
 }
 
 export function getTeamRecord(matches: MatchWithDetails[]): TeamRecord {
+  matches = matches.filter(isCompletedMatch);
   const wins = matches.filter((m) => m.result === "win").length;
   const losses = matches.filter((m) => m.result === "loss").length;
   const halved = matches.filter((m) => m.result === "halved").length;
@@ -192,7 +224,7 @@ export function getPlayerStats(
   matches: MatchWithDetails[],
   playerId: number,
 ): PlayerStats {
-  const playerMatches = matches.filter((m) => isPlayerInMatch(m, playerId));
+  const playerMatches = matches.filter(isCompletedMatch).filter((m) => isPlayerInMatch(m, playerId));
 
   const wins = playerMatches.filter((m) => effectiveResult(m, playerId) === "win").length;
   const losses = playerMatches.filter((m) => effectiveResult(m, playerId) === "loss").length;
@@ -267,6 +299,7 @@ export function getPairingStats(matches: MatchWithDetails[]): PairingRecord[] {
       losses: number;
       halved: number;
       totalCombinedHandicap: number;
+      knownHandicapCount: number;
       played: number;
     }
   >();
@@ -274,7 +307,7 @@ export function getPairingStats(matches: MatchWithDetails[]): PairingRecord[] {
   function addPairing(
     id1: number, id2: number,
     name1: string, name2: string,
-    hcp1: number, hcp2: number,
+    hcp1: number | null, hcp2: number | null,
     result: "win" | "loss" | "halved",
   ) {
     const key = pairKey(id1, id2);
@@ -285,18 +318,21 @@ export function getPairingStats(matches: MatchWithDetails[]): PairingRecord[] {
       p1Id: lowId, p2Id: highId,
       p1Name: lowName, p2Name: highName,
       wins: 0, losses: 0, halved: 0,
-      totalCombinedHandicap: 0, played: 0,
+      totalCombinedHandicap: 0, knownHandicapCount: 0, played: 0,
     };
 
     entry.played++;
     if (result === "win") entry.wins++;
     else if (result === "loss") entry.losses++;
     else entry.halved++;
-    entry.totalCombinedHandicap += hcp1 + hcp2;
+    if (hcp1 !== null && hcp2 !== null) {
+      entry.totalCombinedHandicap += hcp1 + hcp2;
+      entry.knownHandicapCount++;
+    }
     pairings.set(key, entry);
   }
 
-  for (const m of matches) {
+  for (const m of matches.filter(isCompletedMatch)) {
     // Standard team pairing (player1 + player2)
     addPairing(
       m.player1Id, m.player2Id,
@@ -329,7 +365,8 @@ export function getPairingStats(matches: MatchWithDetails[]): PairingRecord[] {
       halved: p.halved,
       winRate: calcWinRate(p.wins + p.halved * 0.5, p.played),
       avgCombinedHandicap:
-        Math.round((p.totalCombinedHandicap / p.played) * 10) / 10,
+        p.knownHandicapCount === 0 ? null : Math.round((p.totalCombinedHandicap / p.knownHandicapCount) * 10) / 10,
+      handicapExcluded: p.played - p.knownHandicapCount,
     }))
     .sort((a, b) => b.winRate - a.winRate || b.played - a.played);
 }
@@ -345,7 +382,7 @@ export function getVenueStats(matches: MatchWithDetails[]): VenueRecord[] {
     }
   >();
 
-  for (const m of matches) {
+  for (const m of matches.filter(isCompletedMatch)) {
     const entry = venues.get(m.venueName) ?? {
       wins: 0,
       losses: 0,
@@ -375,7 +412,7 @@ export function getPlayerVenueStats(
   matches: MatchWithDetails[],
   playerId: number,
 ): VenueRecord[] {
-  const playerMatches = matches.filter((m) => isPlayerInMatch(m, playerId));
+  const playerMatches = matches.filter(isCompletedMatch).filter((m) => isPlayerInMatch(m, playerId));
 
   const venues = new Map<
     string,
@@ -405,12 +442,19 @@ export function getPlayerVenueStats(
 }
 
 const HANDICAP_BUCKETS: { label: string; min: number; max: number }[] = [
-  { label: "-5 to -3", min: -Infinity, max: -3 },
-  { label: "-2 to 0", min: -2, max: 0 },
-  { label: "1 to 3", min: 1, max: 3 },
-  { label: "4 to 6", min: 4, max: 6 },
-  { label: "7+", min: 7, max: Infinity },
+  { label: "<0", min: -Infinity, max: 0 },
+  { label: "0–3", min: 0, max: 3 },
+  { label: ">3–6", min: 3, max: 6 },
+  { label: ">6–<10", min: 6, max: 10 },
+  { label: ">=10", min: 10, max: Infinity },
 ];
+
+/** Normalize arithmetic residuals, not the recorded historical indices. */
+export function getHandicapDifference(m: MatchWithDetails): number | null {
+  if (!hasCompleteHandicaps(m)) return null;
+  return Math.round((m.player1Handicap! + m.player2Handicap! -
+    m.opponent1Handicap! - m.opponent2Handicap!) * 1e9) / 1e9;
+}
 
 export function getHandicapMatchupStats(
   matches: MatchWithDetails[],
@@ -426,16 +470,12 @@ export function getHandicapMatchupStats(
     winRate: 0,
   }));
 
-  for (const m of matches) {
-    const teamHandicap = m.player1Handicap + m.player2Handicap;
-    const opponentHandicap = m.opponent1Handicap + m.opponent2Handicap;
+  for (const m of matches.filter(isCompletedMatch)) {
+    if (m.player1Handicap === null || m.player2Handicap === null ||
+        m.opponent1Handicap === null || m.opponent2Handicap === null) continue;
     // Positive differential = our team has higher (worse) combined handicap
-    const diff = teamHandicap - opponentHandicap;
-
-    const bucket = HANDICAP_BUCKETS.findIndex(
-      (b) => diff >= b.min && diff <= b.max,
-    );
-    if (bucket === -1) continue;
+    const diff = getHandicapDifference(m)!;
+    const bucket = diff < 0 ? 0 : diff <= 3 ? 1 : diff <= 6 ? 2 : diff < 10 ? 3 : 4;
 
     buckets[bucket].played++;
     if (m.result === "win") buckets[bucket].wins++;
@@ -456,6 +496,7 @@ export function getPlayerForm(
   lastN: number = 10,
 ): FormMatch[] {
   const playerMatches = matches
+    .filter(isCompletedMatch)
     .filter((m) => isPlayerInMatch(m, playerId))
     .sort(
       (a, b) =>
@@ -475,12 +516,12 @@ export function getPlayerForm(
     const onOppSide = isOnOpponentSide(m, playerId);
     let partnerId: number;
     let partnerName: string;
-    let playerHandicap: number;
-    let partnerHandicap: number;
+    let playerHandicap: number | null;
+    let partnerHandicap: number | null;
     let opponent1Name: string;
     let opponent2Name: string;
-    let opponent1Handicap: number;
-    let opponent2Handicap: number;
+    let opponent1Handicap: number | null;
+    let opponent2Handicap: number | null;
 
     if (onOppSide) {
       partnerId = m.opponent1Id === playerId ? (m.opponent2Id ?? 0) : (m.opponent1Id ?? 0);
@@ -528,8 +569,8 @@ export function getRecentFixtureResults(
   matches: MatchWithDetails[],
   lastN: number = 5,
 ): FixtureResult[] {
-  const fixtureMap = new Map<number, MatchWithDetails[]>();
-  for (const m of matches) {
+  const fixtureMap = new Map<number, CompletedMatch[]>();
+  for (const m of matches.filter(isCompletedMatch)) {
     const group = fixtureMap.get(m.fixtureId) ?? [];
     group.push(m);
     fixtureMap.set(m.fixtureId, group);
