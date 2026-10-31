@@ -1,5 +1,7 @@
 import sharp from "sharp";
 import { Worker } from "node:worker_threads";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 
 export const MAX_UPLOAD = 20 * 1024 * 1024;
 export const MAX_PAGE = 1024 * 1024;
@@ -51,16 +53,17 @@ async function normalizeImage(buffer: Buffer) {
 }
 
 async function renderPdf(buffer: Buffer): Promise<Buffer[]> {
+  const resolveModule = createRequire(`${process.cwd()}/package.json`);
   // Isolate PDF decoding/rendering so hostile or broken documents have a hard deadline.
   const worker = new Worker(`
     const { parentPort, workerData } = require("node:worker_threads");
     (async () => {
-      const canvas = await import("@napi-rs/canvas");
+      const canvas = await import(workerData.canvasModule);
       globalThis.DOMMatrix = canvas.DOMMatrix;
       globalThis.ImageData = canvas.ImageData;
       globalThis.Path2D = canvas.Path2D;
-      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-      const task = pdfjs.getDocument({data: new Uint8Array(workerData), isEvalSupported: false,
+      const pdfjs = await import(workerData.pdfModule);
+      const task = pdfjs.getDocument({data: new Uint8Array(workerData.buffer), isEvalSupported: false,
         useSystemFonts: true, maxImageSize: 24000000});
       const pdf = await task.promise;
       if (pdf.numPages > 5) throw Error("PDFs must contain at most 5 pages.");
@@ -81,7 +84,15 @@ async function renderPdf(buffer: Buffer): Promise<Buffer[]> {
       await task.destroy();
       parentPort.postMessage({pages});
     })().catch(error => parentPort.postMessage({error: error.message}));
-  `, { eval: true, workerData: buffer, resourceLimits: { maxOldGenerationSizeMb: 256 } });
+  `, {
+    eval: true,
+    workerData: {
+      buffer,
+      canvasModule: pathToFileURL(resolveModule.resolve("@napi-rs/canvas")).href,
+      pdfModule: pathToFileURL(resolveModule.resolve("pdfjs-dist/legacy/build/pdf.mjs")).href,
+    },
+    resourceLimits: { maxOldGenerationSizeMb: 256 },
+  });
   return new Promise((resolve, reject) => {
     let finished = false;
     const timer = setTimeout(() => {

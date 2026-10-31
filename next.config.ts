@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas", "sharp", "pg"],
   outputFileTracingIncludes: {
-    "/api/results-imports/[[...parts]]": [
+    "/api/results-imports/**": [
       "./node_modules/pdfjs-dist/legacy/build/*",
       "./node_modules/pdfjs-dist/standard_fonts/**/*",
       "./node_modules/@napi-rs/canvas/**/*",
