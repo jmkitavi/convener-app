@@ -1,5 +1,5 @@
-import { db } from "./index";
-import { opponentClubs, fixtures } from "./schema";
+import { db } from "./legacy-index";
+import { opponentClubs, fixtures } from "./legacy-schema";
 import { eq } from "drizzle-orm";
 
 async function seedSchedule() {

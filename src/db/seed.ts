@@ -1,5 +1,5 @@
-import { db } from "./index";
-import { players } from "./schema";
+import { db } from "./legacy-index";
+import { players } from "./legacy-schema";
 
 const squadPlayers = [
   "H. Wanyama",

@@ -1,13 +1,17 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
-import path from "path";
+import { requireDatabaseUrl } from "./connection";
 
-const dbPath = process.env.CONVENER_DB_PATH || path.join(process.cwd(), "convener.db");
-const sqlite = new Database(dbPath);
+const state = globalThis as typeof globalThis & { convenerPool?: Pool };
+export const pool = state.convenerPool ?? new Pool({
+  connectionString: requireDatabaseUrl(),
+  max: 3,
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 10_000,
+  allowExitOnIdle: true,
+});
+if (process.env.NODE_ENV !== "production") state.convenerPool = pool;
 
-sqlite.pragma("journal_mode = WAL");
-sqlite.pragma("foreign_keys = ON");
-
-export const db = drizzle(sqlite, { schema });
+export const db = drizzle(pool, { schema });
 export type DB = typeof db;
