@@ -38,6 +38,23 @@ export async function cleanupDrafts() {
       // Retain metadata so a later request can retry source cleanup.
     }
   }
+  let cursor: string | undefined;
+  do {
+    const batch = await sourceStorage.list(cursor);
+    const ids = [...new Set(batch.blobs.map(blob => blob.pathname.split("/")[1]).filter(id => /^[0-9a-f]{8}-[0-9a-f-]{27}$/.test(id)))];
+    const known = await rows<Pick<Draft, "id" | "status" | "expires_at">>(client, "SELECT id, status, expires_at FROM result_imports WHERE id = ANY($1::text[])", [ids]);
+    const records = new Map(known.map(draft => [draft.id, draft]));
+    for (const blob of batch.blobs) {
+      const id = blob.pathname.split("/")[1];
+      if (!ids.includes(id)) continue;
+      const record = records.get(id);
+      if (record ? ["committed", "cancelled"].includes(record.status) || record.expires_at <= new Date().toISOString()
+        : Date.now() - blob.uploadedAt.getTime() > lifetime) {
+        await sourceStorage.deleteFile(blob.pathname);
+      }
+    }
+    cursor = batch.hasMore ? batch.cursor : undefined;
+  } while (cursor);
 }
 
 export async function reserveUpload() {

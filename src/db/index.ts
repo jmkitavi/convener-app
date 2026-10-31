@@ -12,6 +12,7 @@ export const pool = state.convenerPool ?? new Pool({
   allowExitOnIdle: true,
 });
 if (process.env.NODE_ENV !== "production") state.convenerPool = pool;
+pool.on("error", () => console.error("An idle database connection closed; new requests will reconnect."));
 
 export const db = drizzle(pool, { schema });
 export type DB = typeof db;

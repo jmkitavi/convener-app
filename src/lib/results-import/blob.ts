@@ -41,4 +41,5 @@ export const sourceStorage = {
   writePage,
   deleteSources,
   deleteFile: (pathname: string) => del(pathname, blobConfiguration()),
+  list: (cursor?: string) => list({ ...blobConfiguration(), prefix: "results-imports/", cursor }),
 };

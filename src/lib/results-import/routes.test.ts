@@ -28,6 +28,11 @@ test("direct upload/extract/review lifecycle, source deletion, expiry and failed
       for (const pathname of objects.keys()) if (pathname.startsWith(sourcePrefix(id))) objects.delete(pathname);
     }),
     mock.method(sourceStorage, "deleteFile", async (pathname: string) => { objects.delete(pathname); }),
+    mock.method(sourceStorage, "list", async () => ({
+      blobs: [...objects.entries()].map(([pathname, bytes]) => ({
+        pathname, url: "", downloadUrl: "", etag: "", size: bytes.length, uploadedAt: new Date(0),
+      })), hasMore: false,
+    })),
   ];
   const originalFetch = globalThis.fetch;
   let applicationPool: (typeof import("pg"))["Pool"]["prototype"] | undefined;
@@ -96,6 +101,9 @@ test("direct upload/extract/review lifecycle, source deletion, expiry and failed
     await routes.GET(new Request(url), context([]));
     assert.equal(await db.prepare("SELECT id FROM result_imports WHERE id = ?").get(expired), undefined);
     assert.equal(objects.size, 0);
+    objects.set("results-imports/00000000-0000-4000-8000-000000000000/original.png", image);
+    await routes.GET(new Request(url), context([]));
+    assert.equal(objects.size, 0, "An abandoned upload without draft metadata expires too");
     assert.equal((await post([], { id: "https://example.invalid/secret" })).status, 400);
     assert.equal((await routes.GET(new Request(url, { headers: { Origin: "https://example.invalid" } }), context([]))).status, 400);
     const { boundedProcessing } = await import("./store");
