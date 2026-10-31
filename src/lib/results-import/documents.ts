@@ -2,6 +2,7 @@ import sharp from "sharp";
 import { Worker } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
 
 export const MAX_UPLOAD = 20 * 1024 * 1024;
 export const MAX_PAGE = 1024 * 1024;
@@ -64,7 +65,7 @@ async function renderPdf(buffer: Buffer): Promise<Buffer[]> {
       globalThis.Path2D = canvas.Path2D;
       const pdfjs = await import(workerData.pdfModule);
       const task = pdfjs.getDocument({data: new Uint8Array(workerData.buffer), isEvalSupported: false,
-        useSystemFonts: true, maxImageSize: 24000000});
+        useSystemFonts: false, standardFontDataUrl: workerData.standardFonts, maxImageSize: 24000000});
       const pdf = await task.promise;
       if (pdf.numPages > 5) throw Error("PDFs must contain at most 5 pages.");
       const pages = [];
@@ -90,6 +91,7 @@ async function renderPdf(buffer: Buffer): Promise<Buffer[]> {
       buffer,
       canvasModule: pathToFileURL(resolveModule.resolve("@napi-rs/canvas")).href,
       pdfModule: pathToFileURL(resolveModule.resolve("pdfjs-dist/legacy/build/pdf.mjs")).href,
+      standardFonts: `${join(dirname(resolveModule.resolve("pdfjs-dist/package.json")), "standard_fonts")}/`,
     },
     resourceLimits: { maxOldGenerationSizeMb: 256 },
   });

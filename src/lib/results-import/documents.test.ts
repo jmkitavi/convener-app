@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import sharp from "sharp";
+import { jsPDF } from "jspdf";
 import { detectFormat, MAX_PAGE, MAX_UPLOAD, prepareDocument } from "./documents";
 
 test("rejects disguised, oversized and unreadable uploads", async () => {
@@ -46,4 +47,12 @@ test("renders PDF pages locally and rejects more than five pages", async () => {
   assert.equal(pages.length, 1);
   assert.equal((await sharp(pages[0]).metadata()).format, "jpeg");
   await assert.rejects(prepareDocument(pdf(6)), /at most 5 pages/);
+});
+
+test("renders non-embedded PDF text using packaged standard fonts", async () => {
+  const document = new jsPDF();
+  document.text("Results: paired match WIN 2&1", 20, 30);
+  const [page] = await prepareDocument(Buffer.from(document.output("arraybuffer")));
+  const statistics = await sharp(page).stats();
+  assert.ok(statistics.channels.every(channel => channel.min < 100 && channel.stdev > 1));
 });
