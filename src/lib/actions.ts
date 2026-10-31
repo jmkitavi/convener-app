@@ -38,6 +38,7 @@ export async function createPlayer(data: {
       })
       .returning()
       .get();
+    revalidatePath("/", "layout");
     revalidatePath("/players");
     return { success: true, data: result };
   } catch (e) {
@@ -62,6 +63,7 @@ export async function updatePlayer(
       .where(eq(players.id, id))
       .returning()
       .get();
+    revalidatePath("/", "layout");
     revalidatePath("/players");
     revalidatePath(`/players/${id}`);
     return { success: true, data: result };
@@ -85,6 +87,7 @@ export async function togglePlayerActive(id: number) {
       .where(eq(players.id, id))
       .returning()
       .get();
+    revalidatePath("/", "layout");
     revalidatePath("/players");
     revalidatePath(`/players/${id}`);
     return { success: true, data: result };
@@ -144,6 +147,7 @@ export async function createClub(data: {
       })
       .returning()
       .get();
+    revalidatePath("/", "layout");
     revalidatePath("/clubs");
     return { success: true, data: result };
   } catch (e) {
@@ -167,6 +171,7 @@ export async function updateClub(
       .where(eq(opponentClubs.id, id))
       .returning()
       .get();
+    revalidatePath("/", "layout");
     revalidatePath("/clubs");
     revalidatePath(`/clubs/${id}`);
     return { success: true, data: result };
@@ -189,6 +194,7 @@ export async function deleteClub(id: number) {
       };
     }
     db.delete(opponentClubs).where(eq(opponentClubs.id, id)).run();
+    revalidatePath("/", "layout");
     revalidatePath("/clubs");
     return { success: true };
   } catch (e) {
@@ -250,6 +256,7 @@ export async function createFixture(data: {
       })
       .returning()
       .get();
+    revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     return { success: true, data: result };
   } catch (e) {
@@ -281,6 +288,7 @@ export async function updateFixture(
       .where(eq(fixtures.id, id))
       .returning()
       .get();
+    revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     revalidatePath(`/fixtures/${id}`);
     return { success: true, data: result };
@@ -293,6 +301,7 @@ export async function deleteFixture(id: number) {
   try {
     // Matches cascade-delete via FK, so just delete the fixture
     db.delete(fixtures).where(eq(fixtures.id, id)).run();
+    revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     return { success: true };
   } catch (e) {
@@ -439,6 +448,7 @@ export async function createMatch(data: {
       .returning()
       .get();
     syncPlayerHandicaps(db.$client, [data.player1Id, data.player2Id, data.opponent1Id, data.opponent2Id].filter((id): id is number => id != null));
+    revalidatePath("/", "layout");
     revalidatePath(`/fixtures/${data.fixtureId}`);
     revalidatePath("/fixtures");
     return { success: true, data: result };
@@ -480,6 +490,7 @@ export async function updateMatch(
         : []));
       revalidatePath(`/fixtures/${result.fixtureId}`);
     }
+    revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     return { success: true, data: result };
   } catch (e) {
@@ -499,6 +510,7 @@ export async function deleteMatch(id: number) {
       syncPlayerHandicaps(db.$client, [match.player1Id, match.player2Id, match.opponent1Id, match.opponent2Id].filter((id): id is number => id != null));
       revalidatePath(`/fixtures/${match.fixtureId}`);
     }
+    revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     return { success: true };
   } catch (e) {

@@ -1,10 +1,8 @@
-import { getAllMatches } from "@/lib/actions";
-import type { MatchWithDetails } from "@/lib/analytics";
+import { loadInsightData } from "@/lib/insight-data";
 import { AnalyticsClient } from "@/components/analytics-client";
+import { getDataScope } from "@/lib/data-scope";
 
 export default async function AnalyticsPage() {
-  const result = await getAllMatches();
-  const allMatches = (result.data ?? []) as MatchWithDetails[];
-
-  return <AnalyticsClient allMatches={allMatches} />;
+  const [data, scope] = await Promise.all([loadInsightData(), getDataScope()]);
+  return <AnalyticsClient data={data} scope={scope} />;
 }

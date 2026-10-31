@@ -3,6 +3,10 @@ import { players } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { PlayersListClient } from "./players-list-client";
+import { getAllMatches } from "@/lib/actions";
+import { getPlayerForm, getPlayerStats, type MatchWithDetails } from "@/lib/analytics";
+import { getDataScope } from "@/lib/data-scope";
+import { selectMatchesByScope } from "@/lib/insights";
 
 async function createPlayer(formData: FormData) {
   "use server";
@@ -21,6 +25,7 @@ async function createPlayer(formData: FormData) {
   });
 
   revalidatePath("/players");
+  revalidatePath("/", "layout");
 }
 
 async function updatePlayer(formData: FormData) {
@@ -44,6 +49,7 @@ async function updatePlayer(formData: FormData) {
     .where(eq(players.id, id));
 
   revalidatePath("/players");
+  revalidatePath("/", "layout");
 }
 
 async function togglePlayerActive(formData: FormData) {
@@ -57,14 +63,27 @@ async function togglePlayerActive(formData: FormData) {
     .where(eq(players.id, id));
 
   revalidatePath("/players");
+  revalidatePath("/", "layout");
 }
 
 export default async function PlayersPage() {
-  const allPlayers = await db.select().from(players).orderBy(players.name);
+  const [allPlayers, matchResult, scope] = await Promise.all([
+    db.select().from(players).orderBy(players.name),
+    getAllMatches(),
+    getDataScope(),
+  ]);
+  const matches = selectMatchesByScope((matchResult.data ?? []) as MatchWithDetails[], scope);
 
   return (
     <PlayersListClient
-      players={allPlayers}
+      scope={scope}
+      players={allPlayers.map((player) => ({
+        ...player,
+        stats: getPlayerStats(matches, player.id),
+        form: getPlayerForm(matches, player.id, 5),
+      }))}
+      recordedFixtures={new Set(matches.filter((match) => match.result !== "pending").map((match) => match.fixtureId)).size}
+      historyAvailable={matchResult.success}
       createPlayer={createPlayer}
       updatePlayer={updatePlayer}
       togglePlayerActive={togglePlayerActive}

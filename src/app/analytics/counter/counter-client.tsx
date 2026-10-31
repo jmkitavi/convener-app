@@ -1,18 +1,18 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useRef, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Shield,
-  Check,
   Plus,
   Trash2,
   AlertTriangle,
   Save,
   FolderOpen,
-  BarChart3,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import {
   Card,
@@ -29,16 +29,22 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Collapsible } from "@/components/collapsible";
+import { PageHeader } from "@/components/page-header";
+import { PlayerPicker, ScoreBar, ScoreGuide, ToolSection } from "../suggest/tool-workspace";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import {
   suggestCounterPairings,
   type AvailablePlayer,
-  type OpponentPair,
   type CounterPairingResult,
-  type MatchTier,
 } from "@/lib/pairing-engine";
 import type { MatchWithDetails } from "@/lib/analytics";
+import type { DataScope } from "@/lib/insights";
+import { useReportView } from "@/components/reports/report-provider";
+import { recommendationSection } from "@/lib/reports/datasets";
 import { saveLineup, getLineup, deleteLineup } from "@/lib/actions";
+import { completeOpponentPairs, moveOpponentRow, type OpponentRow } from "./lineup-input";
 
 type Player = {
   id: number;
@@ -68,14 +74,6 @@ type SavedLineup = {
   pairCount: number;
 };
 
-type OpponentRow = {
-  opp1Name: string;
-  opp1Handicap: string;
-  opp2Name: string;
-  opp2Handicap: string;
-  isRedMatch: boolean;
-};
-
 const EMPTY_ROW: OpponentRow = {
   opp1Name: "",
   opp1Handicap: "",
@@ -84,32 +82,22 @@ const EMPTY_ROW: OpponentRow = {
   isRedMatch: false,
 };
 
-function ScoreBar({ label, value }: { label: string; value: number }) {
-  const pct = Math.round(value * 100);
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="w-24 shrink-0 text-muted-foreground">{label}</span>
-      <div className="h-2 flex-1 rounded-full bg-gray-100">
-        <div
-          className="h-full rounded-full bg-emerald-500"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="w-8 text-right font-mono">{pct}%</span>
-    </div>
-  );
-}
-
 export function CounterClient({
+  scope = "ndc",
   players,
   clubs,
   allMatches,
   savedLineups: initialLineups,
+  historyError = false,
+  savedLineupsError = false,
 }: {
+  scope?: DataScope;
   players: Player[];
   clubs: Club[];
   allMatches: MatchWithDetails[];
   savedLineups: SavedLineup[];
+  historyError?: boolean;
+  savedLineupsError?: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -118,30 +106,45 @@ export function CounterClient({
     Array.from({ length: 15 }, () => ({ ...EMPTY_ROW })),
   );
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [playerSort, setPlayerSort] = useState<"name" | "handicap">("name");
   const [venueName, setVenueName] = useState<string | undefined>(undefined);
   const [selectedClubId, setSelectedClubId] = useState<number | undefined>(undefined);
-  const [result, setResult] = useState<CounterPairingResult | null>(null);
+  const [savedResult, setResult] = useState<{ scope: DataScope; value: CounterPairingResult } | null>(null);
+  const result = savedResult?.scope === scope ? savedResult.value : null;
+  useReportView({ready:!historyError&&result!==null,section:result?recommendationSection(null,result,venueName):undefined});
 
   // Collapsible state
   const [lineupOpen, setLineupOpen] = useState(true);
   const [playersOpen, setPlayersOpen] = useState(true);
   const [resultsOpen, setResultsOpen] = useState(true);
+  const [stage, setStage] = useState(0);
+  const [showAllRows, setShowAllRows] = useState(false);
+  const stepButtons = useRef<(HTMLButtonElement | null)[]>([]);
+
+  function goToStage(next: number) {
+    setStage(next);
+    stepButtons.current[next]?.focus();
+  }
 
   // Save/load state
   const [savedLineups, setSavedLineups] = useState(initialLineups);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [loadDialogOpen, setLoadDialogOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<SavedLineup | null>(null);
 
-  // Sorted players
-  const sortedPlayers = useMemo(() => {
-    const copy = [...players];
-    if (playerSort === "handicap") {
-      copy.sort((a, b) => a.defaultHandicap - b.defaultHandicap);
-    }
-    return copy;
-  }, [players, playerSort]);
+  function runLineupAction(action: () => Promise<void>) {
+    setError("");
+    setNotice("");
+    startTransition(async () => {
+      try {
+        await action();
+      } catch {
+        setError("The lineup request failed. Your current entries are unchanged. Please try again.");
+      }
+    });
+  }
 
   function updateRow(index: number, field: keyof OpponentRow, value: string | boolean) {
     setOpponentRows((prev) => {
@@ -154,11 +157,17 @@ export function CounterClient({
 
   function addRow() {
     setOpponentRows((prev) => [...prev, { ...EMPTY_ROW }]);
+    setShowAllRows(true);
     setResult(null);
   }
 
   function removeRow(index: number) {
     setOpponentRows((prev) => prev.filter((_, i) => i !== index));
+    setResult(null);
+  }
+
+  function moveRow(index: number, direction: -1 | 1) {
+    setOpponentRows((prev) => moveOpponentRow(prev, index, direction));
     setResult(null);
   }
 
@@ -182,23 +191,8 @@ export function CounterClient({
     setResult(null);
   }
 
-  function getValidOpponentPairs(): OpponentPair[] {
-    return opponentRows
-      .filter(
-        (r) =>
-          r.opp1Name.trim() &&
-          r.opp2Name.trim() &&
-          r.opp1Handicap.trim() &&
-          r.opp2Handicap.trim(),
-      )
-      .map((r) => ({
-        opp1Name: r.opp1Name.trim(),
-        opp1Handicap: parseFloat(r.opp1Handicap),
-        opp2Name: r.opp2Name.trim(),
-        opp2Handicap: parseFloat(r.opp2Handicap),
-        isRedMatch: r.isRedMatch,
-      }))
-      .filter((p) => !isNaN(p.opp1Handicap) && !isNaN(p.opp2Handicap));
+  function getValidOpponentPairs() {
+    return completeOpponentPairs(opponentRows);
   }
 
   function handleGenerate() {
@@ -207,20 +201,30 @@ export function CounterClient({
       .filter((p) => selectedIds.has(p.id))
       .map((p) => ({ id: p.id, name: p.name, handicap: p.defaultHandicap }));
 
-    const res = suggestCounterPairings(opponentPairs, available, allMatches, venueName);
-    setResult(res);
-    setLineupOpen(false);
-    setPlayersOpen(false);
-    setResultsOpen(true);
+    setError("");
+    if (available.some((player) => !Number.isFinite(player.handicap))) {
+      setError("A selected player has no valid handicap. Update their squad record or deselect them before generating.");
+      return;
+    }
+    try {
+      const res = suggestCounterPairings(opponentPairs, available, allMatches, venueName);
+      setResult({ scope, value: res });
+      setLineupOpen(false);
+      setPlayersOpen(false);
+      setResultsOpen(true);
+      goToStage(2);
+    } catch {
+      setError("Counter-pairings could not be generated. Your entries are unchanged; please try again.");
+    }
   }
 
   // Save lineup
   async function handleSave() {
-    if (!saveName.trim()) return;
+    if (!saveName.trim() || isPending) return;
     const pairs = getValidOpponentPairs();
     if (pairs.length === 0) return;
 
-    startTransition(async () => {
+    runLineupAction(async () => {
       const res = await saveLineup({
         name: saveName.trim(),
         clubId: selectedClubId,
@@ -235,14 +239,16 @@ export function CounterClient({
           { id: res.data!.id, name: saveName.trim(), fixtureId: null, clubId: selectedClubId ?? null, clubName: club?.name ?? null, createdAt: new Date().toISOString(), pairCount: pairs.length },
           ...prev,
         ]);
+        setNotice("Opponent lineup saved.");
+      } else {
+        setError(res.error ?? "The lineup could not be saved. Your entries are unchanged.");
       }
     });
   }
 
   // Load lineup
   async function handleLoad(id: number) {
-    const lineup = savedLineups.find((l) => l.id === id);
-    startTransition(async () => {
+    runLineupAction(async () => {
       const res = await getLineup(id);
       if (res.success && res.data) {
         const rows: OpponentRow[] = res.data.pairs.map((p) => ({
@@ -257,22 +263,27 @@ export function CounterClient({
         setResult(null);
         setLineupOpen(true);
         // Set club and venue from lineup
-        if (res.data.clubId) {
-          setSelectedClubId(res.data.clubId);
-          const club = clubs.find((c) => c.id === res.data!.clubId);
-          if (club) setVenueName(club.name);
-        }
+        setSelectedClubId(res.data.clubId ?? undefined);
+        const club = clubs.find((c) => c.id === res.data!.clubId);
+        setVenueName(club?.name);
+        setNotice("Opponent lineup loaded. Review it before generating.");
+      } else {
+        setError(res.error ?? "The saved lineup could not be loaded.");
       }
     });
   }
 
   // Delete lineup
   async function handleDelete(id: number) {
-    startTransition(async () => {
+    runLineupAction(async () => {
       const res = await deleteLineup(id);
       if (res.success) {
         setSavedLineups((prev) => prev.filter((l) => l.id !== id));
+        setDeleteTarget(null);
         router.refresh();
+        setNotice("Saved opponent lineup deleted. Current entries are unchanged.");
+      } else {
+        setError(res.error ?? "The saved lineup could not be deleted.");
       }
     });
   }
@@ -280,7 +291,7 @@ export function CounterClient({
   const validPairs = getValidOpponentPairs();
   const redCount = validPairs.filter((p) => p.isRedMatch).length;
   const selectedCount = selectedIds.size;
-  const canGenerate = validPairs.length > 0 && selectedCount >= 2;
+  const canGenerate = validPairs.length > 0 && selectedCount >= 2 && !historyError;
 
   // Opponent analysis (computed from valid pairs)
   const opponentAnalysis = useMemo(() => {
@@ -313,28 +324,36 @@ export function CounterClient({
   }, [validPairs, redCount]);
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Link
-          href="/analytics"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Counter-Pairing (Away Match)
-          </h1>
-          <p className="text-muted-foreground">
-            Enter the opponent&apos;s lineup and get optimal counter-pairings
-          </p>
-        </div>
-      </div>
+    <div className="page-shell screen-desk">
+      <PageHeader
+        eyebrow="Selection tools / Away"
+        title="Meet their lineup with a plan."
+        description="An ordered response, with every decision still in your hands."
+        actions={<Link href="/analytics/suggest" className="inline-flex min-h-11 items-center gap-2 rounded-lg border bg-card px-4 text-sm font-medium hover:bg-muted"><ArrowLeft aria-hidden="true" className="size-4" />Home pairing tool</Link>}
+      />
+      <nav aria-label="Counter tool steps" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {["Opponent lineup", "Our response", "Review matchups"].map((label, index) => (
+          <button key={label} ref={(button) => { stepButtons.current[index] = button; }} type="button" aria-current={stage === index ? "step" : undefined} aria-controls={`counter-stage-${index}`} onClick={() => goToStage(index)} className={`flex min-h-12 items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm font-medium ${stage === index ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:bg-muted"}`}>
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-current text-xs">{index + 1}</span>{label}
+          </button>
+        ))}
+      </nav>
+      <section className="desk-summary grid gap-4 sm:grid-cols-3" aria-label="Planning summary">
+        <div><p className="text-sm text-white/75">1 · Opponent lineup</p><p className="numeric mt-1 text-2xl font-semibold">{validPairs.length}<span className="text-sm font-normal text-white/75"> complete pairs</span></p></div>
+        <div><p className="text-sm text-white/75">2 · Select the squad</p><p className="numeric mt-1 text-2xl font-semibold">{selectedCount}<span className="text-sm font-normal text-white/75"> / {players.length} players</span></p></div>
+        <div><p className="text-sm text-white/75">3 · Review matchups</p><p className="mt-1 font-semibold">{result === null ? "Ready when you are" : `${result.matchups.length} matchups generated`}</p></div>
+      </section>
+      {historyError && <p role="alert" className="data-note attention-note">Match history could not be loaded. Generation is paused to avoid misleading recommendations. <Link href="/analytics/counter" className="font-medium underline">Reload this tool</Link> to retry.</p>}
+      {savedLineupsError && <p role="alert" className="data-note attention-note">Saved lineups could not be loaded. This does not mean none exist. <Link href="/analytics/counter" className="font-medium underline">Reload to retry.</Link></p>}
+      {error && <p role="alert" className="data-note attention-note">{error}</p>}
+      {notice && <p role="status" className="data-note">{notice}</p>}
+      {isPending && <p role="status" className="text-sm text-muted-foreground">Updating saved lineups…</p>}
 
       {/* Opponent Lineup */}
-      <Collapsible
-        title="Opponent Lineup"
+      <div id="counter-stage-0" className="tool-workspace desk-two-column items-start" style={stage !== 0 ? { display: "none" } : undefined}>
+      <div className="desk-stack min-w-0 space-y-4">
+      <ToolSection
+        title="1 · Opponent lineup"
         badge={validPairs.length > 0 ? `${validPairs.length} pairs` : undefined}
         open={lineupOpen}
         onOpenChange={setLineupOpen}
@@ -343,19 +362,20 @@ export function CounterClient({
           {/* Club selector + Save/Load toolbar */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">Opponent Club</Label>
+              <Label htmlFor="counter-club">Opponent club</Label>
               <Select
                 value={selectedClubId ? String(selectedClubId) : ""}
                 onValueChange={(val) => {
                   const id = val ? parseInt(val) : undefined;
                   setSelectedClubId(id);
+                  setResult(null);
                   if (id) {
                     const club = clubs.find((c) => c.id === id);
                     if (club) setVenueName(club.name);
-                  }
+                  } else setVenueName(undefined);
                 }}
               >
-                <SelectTrigger className="h-8 w-52">
+                <SelectTrigger id="counter-club" className="w-full min-w-0 sm:w-64">
                   <SelectValue placeholder="Select club">
                     {selectedClubId
                       ? clubs.find((c) => c.id === selectedClubId)?.name ?? "Select club"
@@ -377,7 +397,7 @@ export function CounterClient({
                 variant="outline"
                 size="sm"
                 onClick={() => { setSaveDialogOpen(true); setSaveName(""); }}
-                disabled={validPairs.length === 0}
+                disabled={validPairs.length === 0 || isPending}
               >
                 <Save className="mr-1 h-3 w-3" />
                 Save
@@ -385,7 +405,8 @@ export function CounterClient({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setLoadDialogOpen(!loadDialogOpen)}
+                onClick={() => setLoadDialogOpen(true)}
+                disabled={isPending || savedLineupsError}
               >
                 <FolderOpen className="mr-1 h-3 w-3" />
                 Load
@@ -403,42 +424,50 @@ export function CounterClient({
             </div>
           </div>
 
-          {/* Save dialog inline */}
-          {saveDialogOpen && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+          {/* Save and load retain the existing opponent-lineup actions. */}
+          <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Save opponent lineup</DialogTitle><DialogDescription>Save the {validPairs.length} complete opponent pairs for a future planning session. This does not save generated counter-pairings.</DialogDescription></DialogHeader>
+              <Label htmlFor="counter-save-name">Lineup name</Label>
               <Input
+                id="counter-save-name"
                 placeholder="Lineup name (e.g., Thika SC - Mar 2026)"
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
-                className="h-8 flex-1 min-w-[200px]"
+                className="min-w-0"
                 onKeyDown={(e) => e.key === "Enter" && handleSave()}
               />
-              <Button size="sm" onClick={handleSave} disabled={!saveName.trim() || isPending}>
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+              <div className="page-actions">
+              <Button onClick={handleSave} disabled={!saveName.trim() || isPending}>
                 Save
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setSaveDialogOpen(false)}>
+              <Button variant="outline" disabled={isPending} onClick={() => setSaveDialogOpen(false)}>
                 Cancel
               </Button>
-            </div>
-          )}
+              </div>
+            </DialogContent>
+          </Dialog>
 
-          {/* Load dropdown */}
-          {loadDialogOpen && (
-            <div className="rounded-lg border p-3 space-y-2">
+          <Dialog open={loadDialogOpen} onOpenChange={setLoadDialogOpen}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader><DialogTitle>Saved opponent lineups</DialogTitle><DialogDescription>Loading replaces your current opponent entries. Your squad selection is kept.</DialogDescription></DialogHeader>
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+              <div className="space-y-2">
               {savedLineups.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No saved lineups yet.</p>
               ) : (
                 savedLineups.map((l) => (
-                  <div key={l.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                  <div key={l.id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border px-3 py-2">
                     <button
                       type="button"
                       onClick={() => handleLoad(l.id)}
-                      className="flex-1 text-left text-sm"
+                      className="min-h-11 min-w-0 flex-1 text-left text-sm [overflow-wrap:anywhere]"
                       disabled={isPending}
                     >
                       <span className="font-medium">{l.name}</span>
                       {l.clubName && (
-                        <span className="ml-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-muted-foreground">
+                        <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                           {l.clubName}
                         </span>
                       )}
@@ -448,8 +477,9 @@ export function CounterClient({
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDelete(l.id)}
-                      className="ml-2 rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-500"
+                      onClick={() => setDeleteTarget(l)}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      aria-label={`Delete saved lineup ${l.name}`}
                       disabled={isPending}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -457,11 +487,23 @@ export function CounterClient({
                   </div>
                 ))
               )}
-            </div>
-          )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !isPending) setDeleteTarget(null); }}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Delete saved opponent lineup?</DialogTitle><DialogDescription>“{deleteTarget?.name}” will be permanently deleted. Your current opponent entries and squad selection will not change.</DialogDescription></DialogHeader>
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+              <div className="page-actions">
+                <Button variant="outline" disabled={isPending} onClick={() => setDeleteTarget(null)}>Cancel</Button>
+                <Button variant="destructive" disabled={isPending} onClick={() => { if (deleteTarget) handleDelete(deleteTarget.id); }}>Delete lineup</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <p className="data-note">Only rows with both names and both handicaps are used. Red matches cap strokes at 4; regular matches cap strokes at 8. Empty or incomplete rows are not saved or generated.</p>
 
           {/* Column headers */}
-          <div className="hidden lg:grid lg:grid-cols-[2rem_1fr_4rem_1fr_4rem_4rem_2rem] lg:gap-2 lg:px-1 text-xs font-medium text-muted-foreground">
+          <div className="hidden lg:grid lg:grid-cols-[2rem_minmax(0,1fr)_4rem_minmax(0,1fr)_4rem_4rem_2.75rem] lg:gap-2 lg:px-3 text-xs font-medium text-muted-foreground">
             <span>#</span>
             <span>Opponent 1</span>
             <span>Hcp</span>
@@ -471,45 +513,60 @@ export function CounterClient({
             <span />
           </div>
 
-          {opponentRows.map((row, i) => (
+          {opponentRows.map((row, i) => !showAllRows && i >= 4 && !row.opp1Name && !row.opp2Name && !row.opp1Handicap && !row.opp2Handicap && !row.isRedMatch ? null : (
             <div
               key={i}
-              className={`rounded-lg border p-2 ${row.isRedMatch ? "border-red-300 bg-red-50" : ""}`}
+              className={`min-w-0 rounded-lg border p-3 ${row.isRedMatch ? "border-destructive/40 bg-destructive/5" : "bg-muted/20"}`}
             >
-              <div className="grid grid-cols-[2rem_1fr_4rem] gap-2 lg:grid-cols-[2rem_1fr_4rem_1fr_4rem_4rem_2rem] lg:gap-2 items-center">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Position {i + 1}</span>
+                <div className="flex gap-1">
+                  <Button variant="ghost" size="icon" aria-label={`Move opponent match ${i + 1} up`} disabled={i === 0} onClick={() => moveRow(i, -1)}><ArrowUp aria-hidden="true" className="size-4" /></Button>
+                  <Button variant="ghost" size="icon" aria-label={`Move opponent match ${i + 1} down`} disabled={i === opponentRows.length - 1} onClick={() => moveRow(i, 1)}><ArrowDown aria-hidden="true" className="size-4" /></Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_4rem] gap-2 lg:grid-cols-[2rem_minmax(0,1fr)_4rem_minmax(0,1fr)_4rem_4rem_2.75rem] items-center">
                 <span className="text-xs font-medium text-muted-foreground text-center">
                   {i + 1}
                 </span>
                 <Input
                   placeholder="Player 1 name"
+                  aria-label={`Match ${i + 1}, opponent 1 name`}
                   value={row.opp1Name}
                   onChange={(e) => updateRow(i, "opp1Name", e.target.value)}
-                  className="h-8 text-sm"
+                  className="h-10 text-sm"
                 />
                 <Input
                   type="number"
                   placeholder="Hcp"
+                  aria-label={`Match ${i + 1}, opponent 1 handicap`}
+                  step="any"
                   value={row.opp1Handicap}
                   onChange={(e) => updateRow(i, "opp1Handicap", e.target.value)}
-                  className="h-8 text-sm"
+                  className="h-10 text-sm"
                 />
                 <Input
                   placeholder="Player 2 name"
+                  aria-label={`Match ${i + 1}, opponent 2 name`}
                   value={row.opp2Name}
                   onChange={(e) => updateRow(i, "opp2Name", e.target.value)}
-                  className="h-8 text-sm col-span-2 lg:col-span-1 col-start-2"
+                  className="h-10 text-sm col-start-2 lg:col-start-auto"
                 />
                 <Input
                   type="number"
                   placeholder="Hcp"
+                  aria-label={`Match ${i + 1}, opponent 2 handicap`}
+                  step="any"
                   value={row.opp2Handicap}
                   onChange={(e) => updateRow(i, "opp2Handicap", e.target.value)}
-                  className="h-8 text-sm col-start-3 lg:col-start-auto"
+                  className="h-10 text-sm col-start-3 lg:col-start-auto"
                 />
                 <button
                   type="button"
                   onClick={() => updateRow(i, "isRedMatch", !row.isRedMatch)}
-                  className={`flex h-8 items-center justify-center rounded border text-xs font-medium transition-colors ${
+                  aria-label={`Match ${i + 1}, red match (4 stroke cap)`}
+                  aria-pressed={row.isRedMatch}
+                  className={`col-start-2 flex h-11 items-center justify-center rounded border text-xs font-medium transition-colors lg:col-start-auto ${
                     row.isRedMatch
                       ? "border-red-400 bg-red-500 text-white"
                       : "border-border text-muted-foreground hover:bg-muted"
@@ -521,24 +578,30 @@ export function CounterClient({
                 <button
                   type="button"
                   onClick={() => removeRow(i)}
-                  className="flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:bg-red-50 hover:text-red-500"
+                  aria-label={`Remove opponent match ${i + 1}`}
+                  className="flex size-11 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
           ))}
+          {opponentRows.length > 4 && (
+            <Button variant="outline" className="w-full" onClick={() => setShowAllRows((shown) => !shown)}>
+              {showAllRows ? "Hide unused positions after the first four" : `Show all ${opponentRows.length} opponent positions`}
+            </Button>
+          )}
         </div>
-      </Collapsible>
+      </ToolSection>
 
       {/* Opponent Analysis */}
       {opponentAnalysis && (
-        <Collapsible
+        <ToolSection
           title="Opponent Analysis"
           badge={`${opponentAnalysis.totalPairs} pairs`}
           defaultOpen={true}
         >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg border p-3">
               <p className="text-xs text-muted-foreground">Avg Combined Hcp</p>
               <p className="text-xl font-semibold">{opponentAnalysis.avgCombinedHcp.toFixed(1)}</p>
@@ -574,108 +637,49 @@ export function CounterClient({
               </div>
             )}
           </div>
-        </Collapsible>
+        </ToolSection>
       )}
+      <div className="desk-panel-footer flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{validPairs.length} complete pairs · {validPairs.length * 2} players needed</p>
+        <Button onClick={() => { setPlayersOpen(true); goToStage(1); }}>Choose our response</Button>
+      </div>
+      </div>
+      <aside className="desk-panel space-y-5">
+        <div className="desk-panel-header"><h2 className="font-semibold">Order changes the question.</h2><p className="mt-2 text-sm leading-relaxed text-muted-foreground">Away selection responds to a declared opponent order. Enter the names and handicaps, and move rows to match their lineup.</p></div>
+        <dl className="space-y-4 text-sm">
+          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Opponent pairs</dt><dd className="numeric font-semibold">{validPairs.length}</dd></div>
+          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Required players</dt><dd className="numeric font-semibold">{validPairs.length * 2}</dd></div>
+          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Red matches</dt><dd className="numeric font-semibold">{redCount}</dd></div>
+          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Response</dt><dd className="font-semibold">{result ? "Generated" : "Not generated"}</dd></div>
+        </dl>
+        <p className="desk-note text-sm leading-relaxed">Save and load retain the opponent lineup only. Your squad selection and generated response remain temporary.</p>
+      </aside>
+      </div>
 
       {/* Available Players */}
-      <Collapsible
-        title="Available Players"
+      <div id="counter-stage-1" className="tool-workspace desk-two-column items-start" style={stage !== 1 ? { display: "none" } : undefined}>
+      <div className="desk-stack min-w-0 space-y-4">
+      <ToolSection
+        title="2 · Select players"
         badge={`${selectedCount} selected`}
         open={playersOpen}
         onOpenChange={setPlayersOpen}
       >
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                {selectedCount} of {players.length} selected
-                {validPairs.length > 0 && ` (need ≥${validPairs.length * 2})`}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <div className="flex rounded-md border">
-                <button
-                  type="button"
-                  onClick={() => setPlayerSort("name")}
-                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                    playerSort === "name"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  Name
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPlayerSort("handicap")}
-                  className={`border-l px-2.5 py-1 text-xs font-medium transition-colors ${
-                    playerSort === "handicap"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  Handicap
-                </button>
-              </div>
-              <Button variant="outline" size="sm" onClick={selectAll}>
-                Select All
-              </Button>
-              <Button variant="outline" size="sm" onClick={clearAll}>
-                Clear
-              </Button>
-            </div>
-          </div>
-
-          {players.length === 0 ? (
-            <p className="text-muted-foreground">No active players found.</p>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {sortedPlayers.map((p) => {
-                const isSelected = selectedIds.has(p.id);
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => togglePlayer(p.id)}
-                    className={`flex items-center gap-3 rounded-lg border p-3 text-left text-sm transition-colors ${
-                      isSelected
-                        ? "border-emerald-500 bg-emerald-50 text-emerald-900"
-                        : "border-border hover:bg-muted"
-                    }`}
-                  >
-                    <div
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
-                        isSelected
-                          ? "border-emerald-500 bg-emerald-500 text-white"
-                          : "border-gray-300"
-                      }`}
-                    >
-                      {isSelected && <Check className="h-3 w-3" />}
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Handicap: {p.defaultHandicap}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </Collapsible>
+        <PlayerPicker players={players} selectedIds={selectedIds} onToggle={togglePlayer} onSelectAll={selectAll} onClear={clearAll} />
+      </ToolSection>
 
       {/* Venue + Generate */}
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="space-y-1.5">
-          <Label>Venue (optional)</Label>
+      <section className="desk-panel space-y-4">
+        <h2 className="font-semibold">Set the venue &amp; build our response</h2>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Label htmlFor="counter-venue">Venue (optional)</Label>
           <Select
             value={venueName ?? ""}
-            onValueChange={(val) => setVenueName(val || undefined)}
+            onValueChange={(val) => { setVenueName(val || undefined); setResult(null); }}
           >
-            <SelectTrigger className="w-56">
-              <SelectValue placeholder="Any venue" />
+            <SelectTrigger id="counter-venue" className="w-full min-w-0">
+              <SelectValue className="min-w-0 truncate">{venueName ?? "Any venue"}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">Any venue</SelectItem>
@@ -693,9 +697,12 @@ export function CounterClient({
           className="gap-1.5"
         >
           <Shield className="h-4 w-4" />
-          Generate Counter-Pairings
+          Generate counter-pairings
         </Button>
-      </div>
+        </div>
+        <p className="text-sm text-muted-foreground">Changing opponent entries, the squad or venue clears previous recommendations. Saved opponent lineups are separate from this temporary selection.</p>
+        {!validPairs.length && <p className="data-note">Complete at least one opponent pair and select at least two squad players to generate.</p>}
+      </section>
 
       {/* Insufficient players warning */}
       {validPairs.length > 0 && selectedCount < validPairs.length * 2 && (
@@ -707,18 +714,35 @@ export function CounterClient({
           </span>
         </div>
       )}
+      <Button variant="outline" onClick={() => { setLineupOpen(true); goToStage(0); }}><ArrowLeft aria-hidden="true" className="size-4" />Back to opponents</Button>
+      </div>
+      <aside className="desk-panel space-y-4">
+        <h2 className="font-semibold">A response worth reviewing.</h2>
+        <p className="text-sm leading-relaxed text-muted-foreground">Choose a candidate pool for {validPairs.length} opponent pairs. The engine considers handicaps, partnership records, recent form and venue history.</p>
+        <p className="desk-note text-sm leading-relaxed">{selectedCount} selected · {validPairs.length * 2} needed for a complete response. Extra or odd players may remain in reserve; selection does not guarantee a place.</p>
+        <ScoreGuide counter scope={scope} />
+      </aside>
+      </div>
 
       {/* Results */}
-      {result !== null && (
-        <Collapsible
-          title="Counter-Pairings"
+      <div id="counter-stage-2" className="desk-stack min-w-0 space-y-4" style={stage !== 2 ? { display: "none" } : undefined}>
+      <div className="desk-panel flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="font-semibold">A response for the team conversation.</h2><p className="mt-1 text-sm text-muted-foreground">Review the scores, strokes and strategy before deciding your final lineup.</p></div>
+        <Button variant="outline" onClick={() => { setPlayersOpen(true); goToStage(1); }}>Adjust our response</Button>
+      </div>
+      <ScoreGuide counter scope={scope} />
+      {result === null ? (
+        <div className="desk-panel py-8 text-center"><Shield aria-hidden="true" className="mx-auto mb-3 size-6 text-primary" /><h2 className="font-medium">Your matchups will appear here</h2><p className="mt-1 text-sm text-muted-foreground">Complete the opponent lineup, choose your squad and generate to compare strategies.</p></div>
+      ) : (
+        <ToolSection
+          title="Counter-pairing recommendations"
           badge={`${result.matchups.length} matchups`}
           open={resultsOpen}
           onOpenChange={setResultsOpen}
         >
           <div className="space-y-4">
             {/* Summary */}
-            <div className="grid gap-3 sm:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Card size="sm">
                 <CardContent className="flex items-center gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
@@ -881,9 +905,9 @@ export function CounterClient({
                         </div>
 
                         {/* Matchup details */}
-                        <div className="flex-1 space-y-3">
+                        <div className="min-w-0 flex-1 space-y-3 [overflow-wrap:anywhere]">
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                            <div className="flex-1">
+                            <div className="min-w-0 flex-1">
                               <p className="text-xs font-medium text-emerald-600 uppercase tracking-wider">
                                 Our Pair
                               </p>
@@ -941,7 +965,7 @@ export function CounterClient({
                               </div>
                             </div>
 
-                            <div className="flex-1">
+                            <div className="min-w-0 flex-1">
                               <p className="text-xs font-medium text-red-600 uppercase tracking-wider">
                                 Their Pair
                               </p>
@@ -977,6 +1001,7 @@ export function CounterClient({
                             <ScoreBar label="Competitive" value={m.breakdown.competitiveness} />
                             <ScoreBar label="Win Rate" value={m.breakdown.historicalWinRate} />
                             <ScoreBar label="Form" value={m.breakdown.recentForm} />
+                            <ScoreBar label="Venue affinity" value={m.breakdown.venueAffinity} />
                             <ScoreBar label="Band" value={m.breakdown.bandCoherence} />
                             <ScoreBar label="Strength" value={m.breakdown.playerStrength} />
                             <ScoreBar label="Partner Bal." value={m.breakdown.partnerBalance} />
@@ -985,7 +1010,7 @@ export function CounterClient({
                           {/* Reasoning */}
                           <div className="flex flex-wrap gap-1.5">
                             {m.reasoning.map((r, ri) => (
-                              <Badge key={ri} variant="secondary" className="text-xs">
+                              <Badge key={ri} variant="secondary" className="h-auto max-w-full whitespace-normal text-xs">
                                 {r}
                               </Badge>
                             ))}
@@ -999,6 +1024,7 @@ export function CounterClient({
                           }`}>
                             {(m.score * 100).toFixed(0)}
                           </Badge>
+                          <p className="mt-1 text-[10px] text-muted-foreground">Score / 100</p>
                         </div>
                       </div>
                     </CardContent>
@@ -1011,8 +1037,9 @@ export function CounterClient({
               </div>
             )}
           </div>
-        </Collapsible>
+        </ToolSection>
       )}
+      </div>
     </div>
   );
 }

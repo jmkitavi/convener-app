@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState, useTransition } from "react";
+import { unstable_rethrow } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,7 +54,8 @@ export function MatchForm({
   submitLabel?: string;
   isInternalMatch?: boolean;
 }) {
-  const formRef = useRef<HTMLFormElement>(null);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState("");
 
   const defaultP1 = defaultValues?.player1Id
     ? players.find((p) => p.id === defaultValues.player1Id)
@@ -110,8 +112,14 @@ export function MatchForm({
 
   return (
     <form
-      ref={formRef}
-      action={async (formData) => {
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        setError("");
+        if (!player1Id || !player2Id || !result) {
+          setError("Select both players and an explicit result, including Pending if it is not yet known.");
+          return;
+        }
         formData.set("fixtureId", fixtureId.toString());
         if (matchId) formData.set("matchId", matchId.toString());
         if (player1Id) formData.set("player1Id", player1Id.toString());
@@ -125,19 +133,26 @@ export function MatchForm({
         if (opponent1Id) formData.set("opponent1Id", opponent1Id.toString());
         if (opponent2Id) formData.set("opponent2Id", opponent2Id.toString());
         if (result) formData.set("result", result);
-        await action(formData);
-        formRef.current?.reset();
+        startTransition(async () => {
+          try { await action(formData); }
+          catch (error) {
+            unstable_rethrow(error);
+            setError("The match could not be saved. Your entries are still here; please retry.");
+          }
+        });
       }}
-      className="grid gap-4"
+      aria-busy={pending}
+      className="grid min-w-0 gap-4 [&>div]:min-w-0"
     >
-      <p className="text-sm font-medium">Our Pair</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm font-semibold">Our pairing</p>
+      <p className="desk-note text-xs">
         Leave unknown handicaps blank. Current player defaults are suggestions only; apply them explicitly if they match this result.
       </p>
-      <div className="grid grid-cols-[1fr_5rem] gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] gap-3">
         <div className="grid gap-2">
-          <Label>Player 1</Label>
+          <Label htmlFor="matchPlayer1">Player 1</Label>
           <PlayerCombobox
+            id="matchPlayer1"
             players={players}
             value={player1Display}
             onChange={(val, player) => {
@@ -172,10 +187,11 @@ export function MatchForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_5rem] gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] gap-3">
         <div className="grid gap-2">
-          <Label>Player 2</Label>
+          <Label htmlFor="matchPlayer2">Player 2</Label>
           <PlayerCombobox
+            id="matchPlayer2"
             players={players}
             value={player2Display}
             onChange={(val, player) => {
@@ -211,13 +227,14 @@ export function MatchForm({
       </div>
 
       <Separator />
-      <p className="text-sm font-medium">Opponents</p>
+      <p className="text-sm font-semibold">Opponent pairing</p>
 
-      <div className="grid grid-cols-[1fr_5rem] gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] gap-3">
         <div className="grid gap-2">
-          <Label>Opponent 1</Label>
+          <Label htmlFor="matchOpponent1">Opponent 1</Label>
           {isInternalMatch ? (
             <PlayerCombobox
+              id="matchOpponent1"
               players={players}
               value={opponent1Name}
               onChange={(val, player) => {
@@ -233,6 +250,7 @@ export function MatchForm({
             />
           ) : (
             <Input
+              id="matchOpponent1"
               value={opponent1Name}
               onChange={(e) => setOpponent1Name(e.target.value)}
               placeholder="Opponent name"
@@ -260,11 +278,12 @@ export function MatchForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_5rem] gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] gap-3">
         <div className="grid gap-2">
-          <Label>Opponent 2</Label>
+          <Label htmlFor="matchOpponent2">Opponent 2</Label>
           {isInternalMatch ? (
             <PlayerCombobox
+              id="matchOpponent2"
               players={players}
               value={opponent2Name}
               onChange={(val, player) => {
@@ -280,6 +299,7 @@ export function MatchForm({
             />
           ) : (
             <Input
+              id="matchOpponent2"
               value={opponent2Name}
               onChange={(e) => setOpponent2Name(e.target.value)}
               placeholder="Opponent name"
@@ -308,14 +328,14 @@ export function MatchForm({
       </div>
 
       <Separator />
-      <p className="text-sm font-medium">Result</p>
+      <p className="text-sm font-semibold">Result from our team&apos;s perspective</p>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label>Result</Label>
+          <Label htmlFor="matchResult">Result</Label>
           <Select value={result} onValueChange={setResult}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select result" />
+            <SelectTrigger id="matchResult" className="w-full">
+              <SelectValue placeholder="Select result">{result === "win" ? "Win" : result === "loss" ? "Loss" : result === "halved" ? "Halved" : result === "pending" ? "Pending" : undefined}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="win">Win</SelectItem>
@@ -358,7 +378,8 @@ export function MatchForm({
         />
       </div>
 
-      <Button type="submit">{submitLabel}</Button>
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={pending}>{pending ? "Saving match…" : submitLabel}</Button></div>
     </form>
   );
 }

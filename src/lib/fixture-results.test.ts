@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
+import { createRequire } from "node:module";
+import { RequestCookies } from "next/dist/compiled/@edge-runtime/cookies";
+import { RequestCookiesAdapter } from "next/dist/server/web/spec-extension/adapters/request-cookies";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,7 +10,11 @@ import Database from "better-sqlite3";
 import { renderToStaticMarkup } from "react-dom/server";
 import { migrateDatabase } from "../db/migration-helper";
 
-test("fixture cards distinguish no results, pending-only, partial and recorded results, including draws", async () => {
+test("fixture schedule distinguishes no results, pending-only, partial and recorded results, including draws", async () => {
+  let selectedScope = "ndc";
+  const nextHeaders = createRequire(import.meta.url)("next/headers") as typeof import("next/headers");
+  const cookieMock = mock.method(nextHeaders, "cookies", async () =>
+    RequestCookiesAdapter.seal(new RequestCookies(new Headers({ cookie: `convener-data-scope=${selectedScope}` }))));
   const directory = await mkdtemp(path.join(tmpdir(), "convener-fixture-results-"));
   const filename = path.join(directory, "test.db");
   process.env.CONVENER_DB_PATH = filename;
@@ -33,8 +40,8 @@ test("fixture cards distinguish no results, pending-only, partial and recorded r
     const { default: FixturesPage } = await import("../app/fixtures/page");
     applicationDb = (await import("../db")).db.$client;
     const html = renderToStaticMarkup(await FixturesPage());
-    const cards = new Map([...html.matchAll(/<a\b[^>]*href="\/fixtures\/(\d+)"[^>]*>([\s\S]*?)<\/a>/g)]
-      .map((match) => [Number(match[1]), match[2]]));
+    const cards = new Map([...html.matchAll(/<tr\b[^>]*data-fixture-id="(\d+)"[^>]*>[\s\S]*?<\/tr>/g)]
+      .map((match) => [Number(match[1]), match[0]]));
     assert.equal(cards.size, 5);
     assert.match(cards.get(1)!, /No results/);
     assert.match(cards.get(1)!, /border-l-slate-300/);
@@ -49,7 +56,15 @@ test("fixture cards distinguish no results, pending-only, partial and recorded r
     assert.match(cards.get(4)!, /1\/2 results recorded \(1 pending\)/);
     assert.match(cards.get(5)!, /Results recorded/);
     assert.match(cards.get(5)!, /Kenya Air Force Golf Club/);
+    sqlite.prepare("INSERT INTO opponent_clubs (id,name) VALUES (15,'Internal club')").run();
+    sqlite.prepare("UPDATE fixtures SET opponent_club_id=15 WHERE id=2").run();
+    const ndc = renderToStaticMarkup(await FixturesPage());
+    assert.doesNotMatch(ndc, /data-fixture-id="2"/);
+    selectedScope = "all";
+    const all = renderToStaticMarkup(await FixturesPage());
+    assert.match(all, /data-fixture-id="2"/);
   } finally {
+    cookieMock.mock.restore();
     applicationDb?.close();
     sqlite.close();
     await rm(directory, { recursive: true, force: true });

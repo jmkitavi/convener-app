@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState, useTransition } from "react";
+import { unstable_rethrow } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,7 +38,8 @@ export function FixtureForm({
   };
   submitLabel?: string;
 }) {
-  const formRef = useRef<HTMLFormElement>(null);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState("");
   const [clubId, setClubId] = useState<string | null>(
     defaultValues?.opponentClubId?.toString() ?? null,
   );
@@ -47,13 +49,26 @@ export function FixtureForm({
 
   return (
     <form
-      ref={formRef}
-      action={async (formData) => {
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        setError("");
+        if (!clubId) {
+          setError("Select an opponent club before saving.");
+          return;
+        }
         if (clubId) formData.set("opponentClubId", clubId);
         if (homeAway) formData.set("homeAway", homeAway);
-        await action(formData);
+        startTransition(async () => {
+          try { await action(formData); }
+          catch (error) {
+            unstable_rethrow(error);
+            setError("The fixture could not be saved. Your entries are still here; please retry.");
+          }
+        });
       }}
-      className="grid gap-4"
+      aria-busy={pending}
+      className="desk-form-grid grid min-w-0 gap-4 sm:grid-cols-2"
     >
       <div className="grid gap-2">
         <Label htmlFor="date">Date</Label>
@@ -67,10 +82,10 @@ export function FixtureForm({
       </div>
 
       <div className="grid gap-2">
-        <Label>Opponent Club</Label>
+        <Label htmlFor="opponentClubId">Opponent Club</Label>
         <Select value={clubId} onValueChange={setClubId}>
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select a club" />
+          <SelectTrigger id="opponentClubId" className="w-full min-w-0">
+            <SelectValue placeholder="Select a club">{clubs.find((club) => club.id.toString() === clubId)?.name}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {clubs.map((club) => (
@@ -83,10 +98,10 @@ export function FixtureForm({
       </div>
 
       <div className="grid gap-2">
-        <Label>Home / Away</Label>
+        <Label htmlFor="homeAway">Home / Away</Label>
         <Select value={homeAway} onValueChange={setHomeAway}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
+          <SelectTrigger id="homeAway" className="w-full">
+            <SelectValue>{homeAway === "home" ? "Home" : homeAway === "away" ? "Away" : "Neutral"}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="home">Home</SelectItem>
@@ -103,7 +118,7 @@ export function FixtureForm({
         <Label htmlFor="venueName">Venue (optional)</Label>
         <Input id="venueName" name="venueName" defaultValue={defaultValues?.venueName ?? ""} placeholder="Independent course or venue" />
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label htmlFor="teamName">Our team (optional)</Label>
           <Input id="teamName" name="teamName" defaultValue={defaultValues?.teamName ?? ""} />
@@ -114,17 +129,19 @@ export function FixtureForm({
         </div>
       </div>
 
-      <div className="grid gap-2">
+      <div className="grid gap-2 sm:col-span-2">
         <Label htmlFor="notes">Notes</Label>
         <Textarea
           id="notes"
           name="notes"
-          placeholder="Optional notes..."
+          placeholder="Meeting point, travel arrangements, or selection notes…"
           defaultValue={defaultValues?.notes ?? ""}
         />
       </div>
 
-      <Button type="submit">{submitLabel}</Button>
+      {clubs.length === 0 && <p className="desk-note desk-note-amber sm:col-span-2">Add an opponent club on the Clubs page before creating a fixture.</p>}
+      {error && <p role="alert" className="text-sm text-destructive sm:col-span-2">{error}</p>}
+      <div className="flex justify-end border-t pt-4 sm:col-span-2"><Button type="submit" disabled={pending || clubs.length === 0}>{pending ? "Saving fixture…" : submitLabel}</Button></div>
     </form>
   );
 }

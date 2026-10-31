@@ -13,9 +13,9 @@ import {
 import type { VenueRecord } from "@/lib/analytics";
 
 const COLORS = {
-  wins: "#059669",
-  losses: "#f87171",
-  halved: "#fbbf24",
+  wins: "#477c6a",
+  losses: "#223f50",
+  halved: "#d59c48",
 };
 
 export function VenueChart({ venues }: { venues: VenueRecord[] }) {
@@ -24,7 +24,6 @@ export function VenueChart({ venues }: { venues: VenueRecord[] }) {
     Wins: v.wins,
     Losses: v.losses,
     Halved: v.halved,
-    "Win Rate %": Math.round(v.winRate * 1000) / 10,
   }));
 
   if (data.length === 0) {
@@ -36,12 +35,12 @@ export function VenueChart({ venues }: { venues: VenueRecord[] }) {
   }
 
   return (
-    <div className="h-72">
+    <div className="h-72 min-w-0" role="img" aria-label="Wins, halves and losses by venue; exact counts are in the full venue records table.">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="name" fontSize={12} />
-          <YAxis fontSize={12} />
+          <YAxis fontSize={12} allowDecimals={false} />
           <Tooltip />
           <Legend />
           <Bar

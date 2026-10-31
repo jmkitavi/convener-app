@@ -12,14 +12,11 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { revalidatePath } from "next/cache";
 import {
   Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
   CardContent,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +30,8 @@ import { MatchForm } from "@/components/match-form";
 import { FixtureForm } from "@/components/fixture-form";
 import { parseMatchHandicap, syncPlayerHandicaps } from "@/lib/handicaps";
 import { calcFixturePoints } from "@/lib/analytics";
+import { PageHeader } from "@/components/page-header";
+import { fixtureStatus } from "../fixture-status";
 
 export default async function FixtureDetailPage({
   params,
@@ -113,6 +112,7 @@ export default async function FixtureDetailPage({
   // Points calculation
   const decidedMatches = wins + losses + halved;
   const { pointsPerMatch: ppm, teamPoints, maxPoints } = calcFixturePoints(decidedMatches, wins, halved);
+  const status = fixtureStatus({ ...fixture, wins, losses, halved, pending, total: matchList.length }, new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Nairobi" }));
 
   const isInternalMatch = /Kenya Air\s*force/i.test(fixture.clubName ?? "") ||
     matchList.some((match) => match.opponent1Id !== null || match.opponent2Id !== null);
@@ -158,6 +158,7 @@ export default async function FixtureDetailPage({
     syncPlayerHandicaps(db.$client, playerIds);
 
     revalidatePath(`/fixtures/${fId}`);
+    revalidatePath("/", "layout");
     redirect(`/fixtures/${fId}`);
   }
 
@@ -175,6 +176,7 @@ export default async function FixtureDetailPage({
     ]);
 
     revalidatePath(`/fixtures/${fId}`);
+    revalidatePath("/", "layout");
     redirect(`/fixtures/${fId}`);
   }
 
@@ -228,6 +230,7 @@ export default async function FixtureDetailPage({
     syncPlayerHandicaps(db.$client, playerIds);
 
     revalidatePath(`/fixtures/${fId}`);
+    revalidatePath("/", "layout");
     redirect(`/fixtures/${fId}`);
   }
 
@@ -251,15 +254,16 @@ export default async function FixtureDetailPage({
       .where(eq(fixtures.id, fixtureId));
 
     revalidatePath("/fixtures");
+    revalidatePath("/", "layout");
     revalidatePath(`/fixtures/${fixtureId}`);
     redirect(`/fixtures/${fixtureId}`);
   }
 
   function resultLabel(r: string) {
-    if (r === "win") return "W";
-    if (r === "loss") return "L";
-    if (r === "pending") return "?";
-    return "H";
+    if (r === "win") return "Won";
+    if (r === "loss") return "Lost";
+    if (r === "pending") return "Pending";
+    return "Halved";
   }
 
   function resultVariant(r: string) {
@@ -270,14 +274,12 @@ export default async function FixtureDetailPage({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="page-shell screen-desk">
       {/* Fixture header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {fixture.teamName ? `${fixture.teamName} vs ` : "vs "}{fixture.opponentTeamName ?? fixture.clubName ?? "Unknown Club"}
-            </h1>
+      <PageHeader
+        eyebrow="Fixture scorecard"
+        title={`${fixture.teamName ? `${fixture.teamName} vs ` : "vs "}${fixture.opponentTeamName ?? fixture.clubName ?? "Unknown Club"}`}
+        actions={<>
             <Badge
               variant={
                 fixture.homeAway === "home"
@@ -289,11 +291,26 @@ export default async function FixtureDetailPage({
             >
               {fixture.homeAway}
             </Badge>
-          </div>
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+        <Badge variant="outline" className={decidedMatches === 0 ? "border-away/40 bg-away/10 text-away-foreground" : pending ? "border-away/40 bg-away/10 text-away-foreground" : "border-home/30 bg-home/10 text-home-foreground"}>
+          {status === "scheduled" ? "Scheduled" : status === "noresults" ? "No results" : status === "partial" ? "Partial results" : "Results recorded"}
+        </Badge>
+        <Button variant="outline" size="sm" render={<Link href={`/fixtures/import?fixtureId=${fixtureId}`} />}>Import Results</Button>
+        <Dialog key={JSON.stringify([fixture.date, fixture.opponentClubId, fixture.homeAway, fixture.notes, fixture.explicitVenueName, fixture.teamName, fixture.opponentTeamName])}>
+          <DialogTrigger render={<Button variant="outline" size="sm"><Pencil data-icon="inline-start" />Edit Fixture</Button>} />
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader><DialogTitle>Edit Fixture</DialogTitle><DialogDescription>Update the fixture details below.</DialogDescription></DialogHeader>
+            <FixtureForm clubs={clubs} action={updateFixture}
+              defaultValues={{ date: fixture.date, opponentClubId: fixture.opponentClubId, homeAway: fixture.homeAway, notes: fixture.notes ?? undefined, venueName: fixture.explicitVenueName, teamName: fixture.teamName, opponentTeamName: fixture.opponentTeamName }}
+              submitLabel="Update Fixture"
+            />
+          </DialogContent>
+        </Dialog>
+        </>}
+      >
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
               <Calendar className="size-3.5" />
-              {new Date(fixture.date).toLocaleDateString("en-GB", {
+              {new Date(`${fixture.date}T12:00:00`).toLocaleDateString("en-GB", {
                 weekday: "long",
                 day: "numeric",
                 month: "long",
@@ -305,91 +322,22 @@ export default async function FixtureDetailPage({
               {fixture.venueName ?? "Unknown Venue"}
             </span>
           </div>
-          {fixture.notes && (
-            <p className="text-sm text-muted-foreground">{fixture.notes}</p>
-          )}
-        </div>
-
-        <div className="flex gap-2">
-        <Button variant="outline" size="sm" render={<Link href={`/fixtures/import?fixtureId=${fixtureId}`} />}>Import Results</Button>
-        <Dialog>
-          <DialogTrigger
-            render={
-              <Button variant="outline" size="sm">
-                <Pencil data-icon="inline-start" />
-                Edit Fixture
-              </Button>
-            }
-          />
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Edit Fixture</DialogTitle>
-              <DialogDescription>
-                Update the fixture details below.
-              </DialogDescription>
-            </DialogHeader>
-            <FixtureForm
-              clubs={clubs}
-              action={updateFixture}
-              defaultValues={{
-                date: fixture.date,
-                opponentClubId: fixture.opponentClubId,
-                homeAway: fixture.homeAway,
-                notes: fixture.notes ?? undefined,
-                venueName: fixture.explicitVenueName,
-                teamName: fixture.teamName,
-                opponentTeamName: fixture.opponentTeamName,
-              }}
-              submitLabel="Update Fixture"
-            />
-          </DialogContent>
-        </Dialog>
-        </div>
-      </div>
+      </PageHeader>
 
       {/* Summary */}
-      <Card size="sm">
-        <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <span className="text-sm text-muted-foreground">
-            <strong className="text-foreground">{matchList.length}</strong>{" "}
-            {matchList.length === 1 ? "match" : "matches"} recorded
-          </span>
-          {matchList.length > 0 && (
-            <>
-              <Separator orientation="vertical" className="h-4" />
-              <span className="text-sm">
-                <strong className="text-green-600">{wins}</strong> W
-              </span>
-              <span className="text-sm">
-                <strong className="text-red-600">{losses}</strong> L
-              </span>
-              <span className="text-sm">
-                <strong className="text-muted-foreground">{halved}</strong> H
-              </span>
-              {pending > 0 && (
-                <span className="text-sm">
-                  <strong className="text-yellow-600">{pending}</strong> Pending
-                </span>
-              )}
-              <Separator orientation="vertical" className="h-4" />
-              <span className="text-sm font-medium">
-                <strong className="text-emerald-600">{teamPoints.toFixed(2)}</strong>
-                {" / "}
-                {maxPoints.toFixed(2)} pts
-                <span className="ml-1 text-xs text-muted-foreground">
-                  ({ppm.toFixed(2)}/match)
-                </span>
-              </span>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      <section className="desk-summary grid gap-6 sm:grid-cols-3" aria-label="Scorecard summary">
+        <div><p className="text-xs uppercase tracking-wider text-white/65">Fixture points{pending > 0 && decidedMatches > 0 ? " · provisional" : ""}</p><p className="numeric mt-2 text-3xl font-semibold">{decidedMatches > 0 ? teamPoints.toFixed(2) : "—"}{decidedMatches > 0 && <span className="text-base font-normal text-white/70"> / {maxPoints.toFixed(2)}</span>}</p><p className="mt-2 text-xs text-white/75">{decidedMatches > 0 ? `${wins} won · ${halved} halved · ${losses} lost` : "No completed results yet"}</p></div>
+        <div><p className="text-xs uppercase tracking-wider text-white/65">Pair matches</p><p className="numeric mt-2 text-3xl font-semibold">{matchList.length}</p><p className="mt-2 text-xs text-white/75">{decidedMatches} completed · {pending} pending</p></div>
+        <div><p className="text-xs uppercase tracking-wider text-white/65">Venue</p><p className="mt-2 text-3xl font-semibold capitalize">{fixture.homeAway}</p><p className="mt-2 text-xs text-white/75">{fixture.venueName ?? "Unknown venue"}</p></div>
+      </section>
+      {pending > 0 && <p className="desk-note desk-note-amber">Provisional score: {pending} pending match{pending === 1 ? "" : "es"} excluded. Points shown use completed results only and may change as the scorecard is completed.</p>}
 
       {/* Match list */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium">Matches</h2>
-          <Dialog>
+      <div className="desk-two-column">
+      <section className="desk-panel min-w-0 overflow-hidden">
+        <div className="desk-panel-header flex flex-wrap items-center justify-between gap-3">
+          <div><h2 className="font-semibold">The scorecard</h2><p className="text-sm text-muted-foreground">Record the result from our team&apos;s perspective.</p></div>
+          <Dialog key={`add-match-${matchList.length}`}>
             <DialogTrigger
               render={
                 <Button size="sm">
@@ -422,13 +370,15 @@ export default async function FixtureDetailPage({
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-3">
+          <Table>
+            <caption className="sr-only">Fixture match scorecard. Handicaps are shown in parentheses.</caption>
+            <TableHeader><TableRow><TableHead>#</TableHead><TableHead>Our pairing / opponents</TableHead><TableHead>Result</TableHead><TableHead>Score</TableHead><TableHead><span className="sr-only">Match actions</span></TableHead></TableRow></TableHeader>
+            <TableBody>
             {matchList.map((match) => (
-              <Card key={match.id} size="sm">
-                <CardContent className="flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                      <span className="font-medium">
+              <TableRow key={match.id} id={`match-${match.id}`} className="scroll-mt-24">
+                  <TableCell className="text-muted-foreground">{match.matchOrder ?? "—"}</TableCell>
+                  <TableCell className="min-w-60 whitespace-normal [overflow-wrap:anywhere]">
+                      <span className="block font-medium">
                         <Link href={`/players/${match.player1Id}`} className="underline-offset-2 hover:underline">
                           {match.player1Name ?? "?"}
                         </Link>{" "}
@@ -439,8 +389,7 @@ export default async function FixtureDetailPage({
                         </Link>{" "}
                         ({match.player2Handicap ?? "—"})
                       </span>
-                      <span className="text-muted-foreground">vs</span>
-                      <span>
+                      <span className="mt-1 block text-xs text-muted-foreground">vs{" "}
                         {match.opponent1Id ? (
                           <Link href={`/players/${match.opponent1Id}`} className="underline-offset-2 hover:underline">
                             {match.opponent1Name}
@@ -459,24 +408,26 @@ export default async function FixtureDetailPage({
                         )}{" "}
                         ({match.opponent2Handicap ?? "—"})
                       </span>
-                    </div>
                     {match.notes && (
                       <p className="text-xs text-muted-foreground">
                         {match.notes}
                       </p>
                     )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  </TableCell>
+                  <TableCell>
                     <Badge variant={resultVariant(match.result)}>
                       {resultLabel(match.result)}
-                      {match.margin ? ` ${match.margin}` : ""}
                     </Badge>
-                    <Dialog>
+                  </TableCell>
+                  <TableCell className="numeric">{match.margin ?? "—"}</TableCell>
+                  <TableCell><div className="flex items-center gap-1">
+                    <Dialog key={JSON.stringify(match)}>
                       <DialogTrigger
                         render={
                           <Button
                             variant="ghost"
                             size="icon-xs"
+                            aria-label={`Edit match ${match.matchOrder ?? match.id}`}
                             className="text-muted-foreground hover:text-foreground"
                           >
                             <Pencil />
@@ -527,17 +478,28 @@ export default async function FixtureDetailPage({
                         type="submit"
                         variant="ghost"
                         size="icon-xs"
+                        aria-label={`Delete match ${match.matchOrder ?? match.id}`}
                         className="text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 />
                       </Button>
                     </form>
-                  </div>
-                </CardContent>
-              </Card>
+                  </div></TableCell>
+              </TableRow>
             ))}
-          </div>
+            </TableBody>
+          </Table>
         )}
+        <div className="desk-panel-footer text-xs text-muted-foreground">{decidedMatches > 0 ? `${ppm.toFixed(2)} points per completed match on the normalized fixture scale. ` : ""}Pending matches are excluded. Handicaps in parentheses are match-day values; “—” means unknown.</div>
+      </section>
+      <aside className="desk-stack self-start">
+        <section className="desk-panel"><div className="desk-panel-header"><h2 className="font-semibold">Match-day notes</h2></div><p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{fixture.notes || "No notes recorded. Use Edit Fixture to add meeting details or match-day context."}</p></section>
+        <section className="desk-panel"><div className="desk-panel-header"><h2 className="font-semibold">Next steps</h2></div><div className="desk-stack">
+          <div><p className="text-sm font-medium">Review the partnerships</p><p className="mb-3 text-xs text-muted-foreground">See the record beyond this fixture.</p><Button variant="outline" size="sm" render={<Link href="/analytics/pairings" />}>Explore pairings</Button></div>
+          <div><p className="text-sm font-medium">Have a full scorecard?</p><p className="mb-3 text-xs text-muted-foreground">Review extracted rows before saving.</p><Button variant="outline" size="sm" render={<Link href={`/fixtures/import?fixtureId=${fixtureId}`} />}>Import results</Button></div>
+        </div></section>
+        <p className="desk-note">A recorded result means all entered matches are decided, not that an expected number of pairs has been verified.</p>
+      </aside>
       </div>
 
       <div className="pt-4">

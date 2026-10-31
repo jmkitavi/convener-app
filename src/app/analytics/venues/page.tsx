@@ -1,128 +1,49 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { getAllMatches } from "@/lib/actions";
+import { loadInsightData } from "@/lib/insight-data";
+import { getDataScope } from "@/lib/data-scope";
+import { getSeasonSummary, selectInsightData } from "@/lib/insights";
 import { getVenueStats } from "@/lib/analytics";
-import type { MatchWithDetails } from "@/lib/analytics";
+import { TableCell, TableRow } from "@/components/ui/table";
+import { AnalyticsAction, AnalyticsFilters, AnalyticsFrame, AnalyticsPanel, AnalyticsProgress, AnalyticsTable, percent } from "@/components/analytics-view";
+import { analyticsHref, readAnalyticsFilters, type AnalyticsPageProps } from "@/components/analytics-navigation";
 import { VenueChart } from "./venue-chart";
 
-export default async function VenuesPage() {
-  const result = await getAllMatches();
-  const allMatches = (result.data ?? []) as MatchWithDetails[];
-  const venues = getVenueStats(allMatches);
-
+export default async function VenuesPage({ searchParams }: AnalyticsPageProps) {
+  const [data, params, scope] = await Promise.all([loadInsightData(), searchParams, getDataScope()]);
+  const { location } = readAnalyticsFilters(params);
+  const venues = getVenueStats(selectInsightData(data, { scope, location }).matches);
+  const summary = getSeasonSummary(data, { scope, location });
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/analytics"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Venue Performance
-          </h1>
-          <p className="text-muted-foreground">
-            Win rates broken down by venue
-          </p>
-        </div>
+    <AnalyticsFrame title="Different courses. Different stories." description="Compare completed match samples and results at each recorded venue."
+      scope={scope} actions={<AnalyticsAction href={analyticsHref("/analytics/home-away", scope)}>Home &amp; away</AnalyticsAction>}>
+      <AnalyticsFilters scope={scope} location={location} />
+      <p className="data-note">{venues.length} venues · {summary.matchRecord.total} completed matches · {summary.pendingMatchCount} pending rows excluded.
+        Home/away comes from fixture location, not venue names. This view groups venue names only.</p>
+      <div className="desk-two-column">
+      <AnalyticsPanel title="Results by recorded venue" description="Stacked counts of wins, halves and losses. Compare sample sizes before interpreting results.">
+        <VenueChart venues={venues} />
+      </AnalyticsPanel>
+      <AnalyticsPanel title="Course notebook" description="Result yield · Selected location">
+        {!venues.length && <p className="data-note">No completed venue records in the selected scope.</p>}
+        {venues.map((venue) => {
+          const resultYield = (venue.wins + venue.halved * 0.5) / venue.played;
+          return <div key={venue.venueName} className="space-y-2 border-b pb-4 last:border-b-0">
+            <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-medium">{venue.venueName}</h3><strong className="numeric">{percent(resultYield)}</strong></div>
+            <AnalyticsProgress value={resultYield * 100} label={`${venue.venueName} result yield`} />
+            <p className="flex justify-between gap-2 text-xs text-muted-foreground"><span>{venue.played} completed matches</span><span>{venue.wins}W · {venue.halved}H · {venue.losses}L</span></p>
+          </div>;
+        })}
+      </AnalyticsPanel>
       </div>
-
-      {venues.length === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            No venue data yet. Record matches at different venues to see
-            performance by venue.
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Win Rate by Venue</CardTitle>
-              <CardDescription>
-                Comparing performance across all venues played
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <VenueChart venues={venues} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Venue Details</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Venue</TableHead>
-                    <TableHead className="text-right">Played</TableHead>
-                    <TableHead className="text-right">Wins</TableHead>
-                    <TableHead className="text-right">Losses</TableHead>
-                    <TableHead className="text-right">Halved</TableHead>
-                    <TableHead className="text-right">Win Rate</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {venues.map((v) => {
-                    const pct = v.winRate * 100;
-                    return (
-                      <TableRow key={v.venueName}>
-                        <TableCell className="font-medium">
-                          {v.venueName}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {v.played}
-                        </TableCell>
-                        <TableCell className="text-right">{v.wins}</TableCell>
-                        <TableCell className="text-right">
-                          {v.losses}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {v.halved}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge
-                            variant="secondary"
-                            className={
-                              pct >= 60
-                                ? "text-emerald-700 bg-emerald-50"
-                                : pct < 40
-                                  ? "text-red-600 bg-red-50"
-                                  : ""
-                            }
-                          >
-                            {pct.toFixed(1)}%
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </>
-      )}
-    </div>
+      <p className="desk-note">Venue performance describes the recorded sample. It does not isolate a course effect or adjust for opponent strength. Yield is not fixture points capture.</p>
+      <AnalyticsPanel title="Full venue records" description="Result yield = (W + ½H) / played, not pure win rate. It does not adjust for opponents, partners or field size.">
+        <AnalyticsTable label="Venue match records" headings={["Venue", "Completed matches", "W", "H", "L", "Result yield"]}
+          empty={!venues.length ? "No completed venue records in the selected scope." : undefined}>
+          {venues.map((venue) => <TableRow key={venue.venueName}>
+            <TableCell className="font-medium">{venue.venueName}</TableCell><TableCell>{venue.played}</TableCell><TableCell>{venue.wins}</TableCell>
+            <TableCell>{venue.halved}</TableCell><TableCell>{venue.losses}</TableCell><TableCell>{percent((venue.wins + venue.halved * 0.5) / venue.played)}</TableCell>
+          </TableRow>)}
+        </AnalyticsTable>
+      </AnalyticsPanel>
+    </AnalyticsFrame>
   );
 }
