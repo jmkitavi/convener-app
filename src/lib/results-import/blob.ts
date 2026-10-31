@@ -22,7 +22,8 @@ export async function readSource(pathname: string, limit: number) {
 }
 
 export async function writePage(id: string, number: number, bytes: Buffer) {
-  return put(`${sourcePrefix(id)}${number}.jpg`, bytes, {
+  // Fetch rejects shared backing buffers returned by hosted native rendering.
+  return put(`${sourcePrefix(id)}${number}.jpg`, new Uint8Array(bytes).buffer, {
     ...blobConfiguration(), access: "private", contentType: "image/jpeg", addRandomSuffix: false, allowOverwrite: false,
   });
 }
