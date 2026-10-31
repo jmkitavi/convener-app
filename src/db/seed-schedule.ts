@@ -18,7 +18,7 @@ async function seedSchedule() {
     "Sigona Golf Club",
     "Thika Sports Club",
     "Muthaiga Golf Club",
-    "Kenya Airforce Golf Club",
+    "Kenya Air Force Golf Club",
     "Windsor Golf & Country Club",
   ];
 
@@ -35,9 +35,9 @@ async function seedSchedule() {
   }
   console.log(`✅ ${Object.keys(clubMap).length} opponent clubs seeded`);
 
-  // Kenya Airforce 2026 NDC Fixture Schedule
+  // Kenya Air Force 2026 NDC Fixture Schedule
   // Format: [date, opponent, home/away]
-  // Home = played at Kenya Airforce Golf Club
+  // Home = played at Kenya Air Force Golf Club
   // Away = played at opponent's home course
   const schedule: [string, string, "home" | "away"][] = [
     // Day 1 (18.01.2026): REST

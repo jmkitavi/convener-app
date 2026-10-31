@@ -1,0 +1,76 @@
+@charset "UTF-8";
+
+/* A color-only companion to Clubhouse; the original layout and snapshot stay shared. */
+body[data-variation="color"] {
+  --forest: #236f4d;
+  --gold: #b87e30;
+  --line: #e4e9e1;
+}
+
+[data-variation="color"] .season-hero {
+  background: radial-gradient(ellipse at 95% 0%, #49654680, transparent 65%), #1d4739;
+}
+[data-variation="color"] .hero-progress > span { background: #dce8b6; }
+[data-variation="color"] .hero-score { color: #fff5dd; }
+[data-variation="color"] .record-numbers > div:first-child b { color: #d1ebbf; }
+[data-variation="color"] .record-numbers > div:nth-child(2) b { color: #edd4a3; }
+
+[data-variation="color"] .metric:first-child {
+  border-top: 3px solid #498160;
+  padding-top: 18px;
+}
+[data-variation="color"] .metric:last-child {
+  background: #fcf8ee;
+  border-color: #e9dec6;
+}
+[data-variation="color"] .metric-value { color: #245c43; }
+[data-variation="color"] .metric:last-child .metric-value { color: #866025; }
+[data-variation="color"] .attention-dot { background: #b87e30; }
+
+[data-variation="color"] .chart-bar.home .bar-fill,
+[data-variation="color"] .legend-dot.home { background: #236f4d; }
+[data-variation="color"] .chart-bar.away .bar-fill,
+[data-variation="color"] .legend-dot.away { background: #b87e30; }
+[data-variation="color"] .trend-notes > div:first-child {
+  background: #fbf4e8;
+  border-radius: 8px;
+  padding: 12px;
+}
+[data-variation="color"] .trend-notes > div:first-child strong { color: #876027; }
+[data-variation="color"] .trend-notes > div:nth-child(2) {
+  background: #eef6ef;
+  border-radius: 8px;
+  padding: 12px;
+}
+[data-variation="color"] .trend-notes > div:nth-child(2) strong { color: #236f4d; }
+[data-variation="color"] .trend-notes > div:last-child { padding: 12px 0; }
+
+[data-variation="color"] .home-away .track > span { background: #236f4d; }
+[data-variation="color"] .home-away .venue-stat:nth-of-type(3) .track > span { background: #b87e30; }
+[data-variation="color"] .insight-note,
+[data-variation="color"] .pair-coverage { background: #edf6ef; }
+[data-variation="color"] .travel-track.away span { background: #b87e30; }
+
+[data-variation="color"] .score-cell,
+[data-variation="color"] .leader-table td:last-child strong { color: #236f4d; }
+[data-variation="color"] .leader-track i { background: #72a184; }
+[data-variation="color"] .leader-table tbody tr:first-child .leader-rank {
+  color: #8b6329;
+  background: #f7edda;
+  border-radius: 5px;
+  padding: 4px 6px;
+}
+[data-variation="color"] .attention-strip {
+  background: #f7f2e7;
+  border-color: #e9dfc9;
+}
+[data-variation="color"] .attention-strip .attention-icon,
+[data-variation="color"] .attention-strip .count-badge {
+  background: #ede2c9;
+  color: #86672f;
+}
+[data-variation="color"] .attention-strip .eyebrow { color: #856832; }
+
+@media (max-width: 640px) {
+  [data-variation="color"] .metric:first-child { padding-top: 12px; }
+}

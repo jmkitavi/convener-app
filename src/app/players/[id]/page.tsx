@@ -15,6 +15,8 @@ import {
   type MatchWithDetails,
 } from "@/lib/analytics";
 import { PlayerDetailClient } from "./player-detail-client";
+import { getDataScope } from "@/lib/data-scope";
+import { selectMatchesByScope } from "@/lib/insights";
 
 async function updatePlayer(formData: FormData) {
   "use server";
@@ -38,6 +40,7 @@ async function updatePlayer(formData: FormData) {
 
   revalidatePath(`/players/${id}`);
   revalidatePath("/players");
+  revalidatePath("/", "layout");
 }
 
 async function togglePlayerActive(formData: FormData) {
@@ -52,6 +55,7 @@ async function togglePlayerActive(formData: FormData) {
 
   revalidatePath(`/players/${id}`);
   revalidatePath("/players");
+  revalidatePath("/", "layout");
 }
 
 export default async function PlayerDetailPage({
@@ -70,8 +74,8 @@ export default async function PlayerDetailPage({
     notFound();
   }
 
-  const matchResult = await getAllMatches();
-  const allMatches = (matchResult.data ?? []) as MatchWithDetails[];
+  const [matchResult, scope] = await Promise.all([getAllMatches(), getDataScope()]);
+  const allMatches = selectMatchesByScope((matchResult.data ?? []) as MatchWithDetails[], scope);
 
   const stats = getPlayerStats(allMatches, player.id);
   const form = getPlayerForm(allMatches, player.id, 10);
@@ -124,6 +128,7 @@ export default async function PlayerDetailPage({
 
     return {
       id: m.id,
+      fixtureId: m.fixtureId,
       fixtureDate: m.fixtureDate,
       venueName: m.venueName,
       opponentClubName: m.opponentClubName,
@@ -139,9 +144,15 @@ export default async function PlayerDetailPage({
       margin: m.margin,
     };
   });
+  const homeAwayStats = (["home", "away", "neutral"] as const).map((location) => {
+    const completed = playerMatchesSorted.filter((match) => match.result !== "pending" && match.homeAway === location);
+    const credits = completed.reduce((total, match) => total + (effectiveResult(match, player.id) === "win" ? 1 : effectiveResult(match, player.id) === "halved" ? 0.5 : 0), 0);
+    return { location, played: completed.length, yield: completed.length ? credits / completed.length : 0 };
+  });
 
   return (
     <PlayerDetailClient
+      scope={scope}
       player={player}
       stats={stats}
       form={form}
@@ -149,6 +160,8 @@ export default async function PlayerDetailPage({
       handicapTrend={handicapTrend}
       handicapTrendExcluded={handicapTrendExcluded}
       matchHistory={matchHistory}
+      homeAwayStats={homeAwayStats}
+      historyAvailable={matchResult.success}
       updatePlayer={updatePlayer}
       togglePlayerActive={togglePlayerActive}
     />

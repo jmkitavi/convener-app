@@ -1,113 +1,54 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from "@/components/ui/table";
-import { getAllMatches } from "@/lib/actions";
-import { getHandicapMatchupStats, hasCompleteHandicaps, isCompletedMatch } from "@/lib/analytics";
-import type { MatchWithDetails, HandicapBucket } from "@/lib/analytics";
+import { loadInsightData } from "@/lib/insight-data";
+import { getDataScope } from "@/lib/data-scope";
+import { getHandicapInsights } from "@/lib/insights";
+import { TableCell, TableRow } from "@/components/ui/table";
+import { AnalyticsAction, AnalyticsFrame, AnalyticsPanel, AnalyticsStats, AnalyticsTable, percent } from "@/components/analytics-view";
+import { analyticsHref } from "@/components/analytics-navigation";
 import { HandicapChart } from "./handicap-chart";
 
+const mean = (value: number | null) => value === null ? "—" : value.toFixed(2);
+
 export default async function HandicapsPage() {
-  const result = await getAllMatches();
-  const allMatches = (result.data ?? []) as MatchWithDetails[];
-  const buckets = getHandicapMatchupStats(allMatches);
-  const completed = allMatches.filter(isCompletedMatch);
-  const excluded = completed.filter((match) => !hasCompleteHandicaps(match)).length;
-
+  const [data, scope] = await Promise.all([loadInsightData(), getDataScope()]);
+  const insight = getHandicapInsights(data, { scope });
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/analytics"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Handicap Matchup Analysis
-          </h1>
-          <p className="text-muted-foreground">
-            Performance by combined handicap differential (team − opponents)
-          </p>
-        </div>
+    <AnalyticsFrame title="Balance the squad, not just the numbers." description="Historical index gaps and observed results, without overstating the link."
+      scope={scope} actions={<AnalyticsAction href="/players">Explore the squad</AnalyticsAction>}>
+      <AnalyticsStats items={[
+        { label: "Complete historical sample", value: insight.completeCount, detail: "All four recorded match indices known" },
+        { label: "Excluded from index analysis", value: insight.excludedCount, detail: "At least one historical index is unknown" },
+        { label: "Recorded index coverage", value: insight.completedCount ? percent(insight.completeCount / insight.completedCount) : "—", detail: `${insight.completeCount} of ${insight.completedCount} completed matches` },
+        { label: "Mean combined index gap", value: mean(insight.meanDifference), detail: "Team indices minus opponent indices" },
+      ]} />
+      <p className="desk-note desk-note-amber">{insight.completeCount} complete / {insight.completedCount} completed matches · {insight.excludedCount} excluded because at least one historical handicap is unknown.
+        {" "}<Link href={analyticsHref("/analytics/data-quality", scope)} className="underline underline-offset-4">Review missing indices</Link></p>
+      <div className="desk-two-column">
+      <AnalyticsPanel title="A view of the recorded index gaps" description="Completed matches grouped by combined index difference, not current roster index bands.">
+        <HandicapChart buckets={insight.buckets} mode="samples" />
+        <p className="desk-panel-footer text-xs text-muted-foreground">Historical snapshots only. Missing indices are never replaced with current player indices.</p>
+      </AnalyticsPanel>
+      <AnalyticsPanel title="Results by index gap" description="Continuous, non-overlapping buckets include decimal index differences.">
+        <AnalyticsTable label="Results by recorded index gap" headings={["Combined index gap", "Played", "W / H / L", "Result yield"]}
+          empty={!insight.completeCount ? "No completed matches have all four recorded indices in this scope." : undefined}>
+          {insight.buckets.map((bucket) => <TableRow key={bucket.label}>
+            <TableCell>{bucket.label}</TableCell><TableCell>{bucket.played}</TableCell>
+            <TableCell>{bucket.wins} / {bucket.halved} / {bucket.losses}</TableCell><TableCell>{bucket.played ? percent((bucket.wins + 0.5 * bucket.halved) / bucket.played) : "—"}</TableCell>
+          </TableRow>)}
+        </AnalyticsTable>
+        <p className="desk-note">Small samples and partner effects mean this is not a selection rule. Result yield = (W + ½H) / played, not pure win rate.</p>
+      </AnalyticsPanel>
       </div>
-
-      <p className="text-sm text-muted-foreground">
-        Excludes {excluded} completed match{excluded === 1 ? "" : "es"} with unknown handicaps and all pending results.
-      </p>
-
-      {allMatches.length === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            No match data yet. Record matches to see handicap analysis.
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Win Rate by Handicap Differential</CardTitle>
-              <CardDescription>
-                Positive differential = your team has higher (worse) combined
-                handicap
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <HandicapChart buckets={buckets} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Detailed Breakdown</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Differential Range</TableHead>
-                    <TableHead className="text-right">Played</TableHead>
-                    <TableHead className="text-right">Wins</TableHead>
-                    <TableHead className="text-right">Losses</TableHead>
-                    <TableHead className="text-right">Halved</TableHead>
-                    <TableHead className="text-right">Win Rate</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {buckets.map((b) => (
-                    <TableRow key={b.label}>
-                      <TableCell className="font-medium">{b.label}</TableCell>
-                      <TableCell className="text-right">{b.played}</TableCell>
-                      <TableCell className="text-right">{b.wins}</TableCell>
-                      <TableCell className="text-right">{b.losses}</TableCell>
-                      <TableCell className="text-right">{b.halved}</TableCell>
-                      <TableCell className="text-right">
-                        {b.played > 0
-                          ? `${(b.winRate * 100).toFixed(1)}%`
-                          : "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </>
-      )}
-    </div>
+      <AnalyticsPanel title="Recorded index context" description="Positive gaps mean a higher combined team index. These are index differences, not playing strokes or allocated shots.">
+        <AnalyticsTable label="Mean recorded indices by location" headings={["Location", "Complete sample", "Excluded", "Mean team combined", "Mean opponent combined", "Mean index gap"]}>
+          {[{ location: "all", ...insight }, ...insight.byLocation].map((row) => <TableRow key={row.location}>
+            <TableCell className="capitalize">{row.location}</TableCell><TableCell>{row.completeCount}</TableCell><TableCell>{row.excludedCount}</TableCell>
+            <TableCell>{mean(row.meanTeamCombined)}</TableCell><TableCell>{mean(row.meanOpponentCombined)}</TableCell><TableCell>{mean(row.meanDifference)}</TableCell>
+          </TableRow>)}
+        </AnalyticsTable>
+        <p className="data-note">Only completed matches with all four recorded handicaps contribute. Unknown is not zero; current player indices do not fill historical gaps.
+          These associations do not show that handicap gaps cause results. Course and playing-handicap rules are not modeled here.</p>
+      </AnalyticsPanel>
+    </AnalyticsFrame>
   );
 }

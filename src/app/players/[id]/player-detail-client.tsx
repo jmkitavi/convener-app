@@ -3,54 +3,18 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@/components/ui/table";
-import { PlayerForm } from "@/components/player-form";
-import {
-  ArrowLeftIcon,
-  PencilIcon,
-  MailIcon,
-  PhoneIcon,
-  TrophyIcon,
-  BarChart3Icon,
-  TrendingUpIcon,
-  UsersIcon,
-  MapPinIcon,
-  HistoryIcon,
-} from "lucide-react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { PlayerForm, PlayerStatusForm } from "@/components/player-form";
+import { PageHeader } from "@/components/page-header";
+import { ArrowLeftIcon, PencilIcon, MailIcon, PhoneIcon } from "lucide-react";
+import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { PlayerHandicapChart, type HandicapHistoryPoint } from "@/components/player-handicap-chart";
 import type { PlayerStats, FormMatch, VenueRecord } from "@/lib/analytics";
+import type { DataScope } from "@/lib/insights";
+import { useReportView } from "@/components/reports/report-provider";
+import type { ReportConfig } from "@/lib/reports/contracts";
 
 interface Player {
   id: number;
@@ -62,14 +26,9 @@ interface Player {
   createdAt: string;
 }
 
-type HandicapPoint = {
-  date: string;
-  handicap: number;
-  result: "win" | "loss" | "halved";
-};
-
 type MatchHistoryEntry = {
   id: number;
+  fixtureId: number;
   fixtureDate: string;
   venueName: string;
   opponentClubName: string;
@@ -86,599 +45,137 @@ type MatchHistoryEntry = {
 };
 
 interface PlayerDetailClientProps {
+  scope?: DataScope;
   player: Player;
   stats: PlayerStats;
   form: FormMatch[];
   venueStats: VenueRecord[];
-  handicapTrend: HandicapPoint[];
+  handicapTrend: HandicapHistoryPoint[];
   handicapTrendExcluded: number;
   matchHistory: MatchHistoryEntry[];
+  homeAwayStats: { location: "home" | "away" | "neutral"; played: number; yield: number }[];
+  historyAvailable: boolean;
   updatePlayer: (formData: FormData) => Promise<void>;
   togglePlayerActive: (formData: FormData) => Promise<void>;
 }
 
-const RESULT_COLORS = {
-  win: "#10b981",
-  loss: "#ef4444",
-  halved: "#f59e0b",
-} as const;
-
-function ResultBadge({ result }: { result: "win" | "loss" | "halved" | "pending" }) {
-  const variant =
-    result === "win"
-      ? "default"
-      : result === "loss"
-        ? "destructive"
-        : "outline";
-  return (
-    <Badge variant={variant} className="capitalize">
-      {result}
-    </Badge>
-  );
+function ResultBadge({ result }: { result: MatchHistoryEntry["result"] }) {
+  return <span className="desk-status capitalize" data-tone={result === "win" ? "home" : result === "loss" ? "danger" : "neutral"}>{result}</span>;
 }
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+function formatDate(date: string) {
+  return new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
-
-function formatShortDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  });
+function PanelHeader({ title, description }: { title: string; description?: string }) {
+  return <div className="desk-panel-header"><div><h2 className="font-semibold">{title}</h2>{description && <p className="text-sm text-muted-foreground">{description}</p>}</div></div>;
 }
-
-function CustomDot(props: {
-  cx?: number;
-  cy?: number;
-  payload?: HandicapPoint;
-}) {
-  const { cx, cy, payload } = props;
-  if (cx == null || cy == null || !payload) return null;
-  return (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={5}
-      fill={RESULT_COLORS[payload.result]}
-      stroke="white"
-      strokeWidth={2}
-    />
-  );
+function PartnerLink({ id, name }: { id: number; name: string }) {
+  return id > 0 ? <Link href={`/players/${id}`} className="text-primary hover:underline">{name}</Link> : <span>{name}</span>;
+}
+function MatchTable({ matches, player }: { matches: MatchHistoryEntry[]; player: Player }) {
+  return <Table>
+    <TableHeader><TableRow><TableHead>Fixture</TableHead><TableHead>Pairing / handicaps</TableHead><TableHead>Opponents / handicaps</TableHead><TableHead>Result</TableHead></TableRow></TableHeader>
+    <TableBody>{matches.length ? matches.map((match) => <TableRow key={match.id}>
+      <TableCell><Link href={`/fixtures/${match.fixtureId}`} className="font-medium hover:underline">{match.opponentClubName}</Link><span className="block text-xs text-muted-foreground">{formatDate(match.fixtureDate)} · {match.venueName}</span></TableCell>
+      <TableCell><span className="font-medium">{player.name}</span> <span className="text-xs text-muted-foreground">({match.playerHandicap ?? "—"})</span><br /><PartnerLink id={match.partnerId} name={match.partnerName} /> <span className="text-xs text-muted-foreground">({match.partnerHandicap ?? "—"})</span></TableCell>
+      <TableCell>{match.opponent1Name} <span className="text-xs text-muted-foreground">({match.opponent1Handicap ?? "—"})</span><br />{match.opponent2Name} <span className="text-xs text-muted-foreground">({match.opponent2Handicap ?? "—"})</span></TableCell>
+      <TableCell><ResultBadge result={match.result} />{match.margin && <span className="ml-1.5 text-xs text-muted-foreground">{match.margin}</span>}</TableCell>
+    </TableRow>) : <TableRow><TableCell colSpan={4} className="py-10 text-center text-muted-foreground">No matches recorded yet.</TableCell></TableRow>}</TableBody>
+  </Table>;
 }
 
 export function PlayerDetailClient({
-  player,
-  stats,
-  form,
-  venueStats,
-  handicapTrend,
-  handicapTrendExcluded,
-  matchHistory,
-  updatePlayer,
-  togglePlayerActive,
+  scope = "ndc",
+  player, stats, form, venueStats, handicapTrend, handicapTrendExcluded, matchHistory,
+  homeAwayStats, historyAvailable, updatePlayer, togglePlayerActive,
 }: PlayerDetailClientProps) {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const hasMatches = stats.played > 0;
-
-  async function handleUpdate(formData: FormData) {
-    formData.append("id", player.id.toString());
-    await updatePlayer(formData);
+  const [profileTab,setProfileTab] = useState<ReportConfig["profileTab"]>("overview");
+  useReportView({filters:{profileTab},ready:historyAvailable});
+  const recentMatches = [...form].reverse().flatMap((match) => {
+    const history = matchHistory.find((entry) => entry.id === match.id);
+    return history ? [history] : [];
+  });
+  const latest = matchHistory.find((match) => match.result !== "pending");
+  const chartData = homeAwayStats.filter((record) => record.played > 0).map((record) => ({
+    ...record, label: record.location[0].toUpperCase() + record.location.slice(1), resultYield: record.yield * 100,
+  }));
+  async function handleUpdate(data: FormData) {
+    data.append("id", String(player.id));
+    await updatePlayer(data);
     setEditDialogOpen(false);
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/players">
-          <Button variant="ghost" size="sm">
-            <ArrowLeftIcon />
-            Back to Players
-          </Button>
-        </Link>
-      </div>
+  return <div className="page-shell screen-desk">
+    <header className="flex flex-wrap items-center gap-4 border-b pb-6">
+      <span className="desk-avatar !size-16 !text-xl" aria-hidden="true">{player.name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("")}</span>
+      <div className="min-w-0 flex-1"><PageHeader title={player.name} eyebrow="The squad / Player profile" description={`Handicap ${player.defaultHandicap.toFixed(1)} · ${player.active ? "Active" : "Inactive"} squad · ${scope === "ndc" ? "NDC only" : "Includes internal matches"}`} /></div>
+      <div className="flex flex-wrap items-center gap-2"><Button variant="outline" onClick={() => setEditDialogOpen(true)}><PencilIcon />Edit player</Button><Button variant="outline" render={<Link href="/players" />}><ArrowLeftIcon />The squad</Button></div>
+    </header>
+    {!historyAvailable && <p role="alert" className="desk-note desk-note-amber">Match history could not be loaded. Player details are available; reload to retry performance statistics.</p>}
 
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">{player.name}</h1>
-          <form action={togglePlayerActive}>
-            <input type="hidden" name="id" value={player.id} />
-            <input
-              type="hidden"
-              name="active"
-              value={String(player.active)}
-            />
-            <button type="submit" className="cursor-pointer">
-              <Badge variant={player.active ? "default" : "secondary"}>
-                {player.active ? "Active" : "Inactive"}
-              </Badge>
-            </button>
-          </form>
+    <Tabs value={profileTab} onValueChange={value=>setProfileTab(value as ReportConfig["profileTab"])}>
+      <TabsList variant="line" className="max-w-full flex-wrap">
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="history">Match history</TabsTrigger>
+        <TabsTrigger value="partners">Pairings</TabsTrigger>
+        <TabsTrigger value="handicaps">Handicap history</TabsTrigger>
+        <TabsTrigger value="venues">Venues</TabsTrigger>
+      </TabsList>
+      <TabsContent value="overview" className="space-y-5">
+        <div className="desk-stats">
+          {[
+            ["Appearances", historyAvailable ? stats.played : "—", "Completed matches · both sides"],
+            ["Result yield", historyAvailable && stats.played ? `${(stats.winRate * 100).toFixed(1)}%` : "—", "Wins + half of halved / played"],
+            ["Recorded wins", historyAvailable ? stats.wins : "—", historyAvailable ? `${stats.halved} halved · ${stats.losses} losses` : "Match history unavailable"],
+            ["Handicap index", player.defaultHandicap.toFixed(1), "Current player default"],
+          ].map(([label, value, detail]) => <div className="desk-stat" key={label}><p className="desk-stat-label">{label}</p><p className="desk-stat-value">{value}</p><p className="desk-stat-detail">{detail}</p></div>)}
         </div>
-        <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
-          <PencilIcon />
-          Edit Player
-        </Button>
-      </div>
+        <div className="desk-two-column">
+          <section className="desk-panel">
+            <PanelHeader title="Home ground, away days." description="Recorded result yield by fixture location, not an outcome prediction." />
+            {chartData.length ? <div className="h-60" role="img" aria-label={chartData.map((record) => `${record.label}: ${record.resultYield.toFixed(1)}% yield from ${record.played} appearances`).join(". ")}>
+              <ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} margin={{ top: 16, right: 12, bottom: 4, left: 0 }}><CartesianGrid vertical={false} strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="label" fontSize={12} /><YAxis domain={[0, 100]} tickFormatter={(value) => `${value}%`} fontSize={11} /><Tooltip formatter={(value) => [`${Number(value).toFixed(1)}%`, "Result yield"]} /><Bar dataKey="resultYield" maxBarSize={75} radius={[3, 3, 0, 0]}>{chartData.map((record) => <Cell key={record.location} fill={record.location === "home" ? "#3e7055" : record.location === "away" ? "#805719" : "#7c8079"} />)}</Bar></BarChart></ResponsiveContainer>
+            </div> : <p className="py-16 text-center text-sm text-muted-foreground">{historyAvailable ? "Complete a match to see location performance." : "Match statistics are unavailable."}</p>}
+            <div className="desk-note">{homeAwayStats.map((record) => `${record.location}: ${record.played}`).join(" · ")} completed appearances. Home/away follows the recorded fixture, including opponent-side appearances. A small sample tells only part of the story; partner selection and opposition also matter.</div>
+          </section>
+          <aside className="desk-panel">
+            <PanelHeader title="Player notebook" description="Recorded details, without assumptions." />
+            <dl className="space-y-4 text-sm">
+              <div className="flex items-center justify-between gap-3 border-b pb-3"><dt className="text-muted-foreground">Squad status</dt><dd><PlayerStatusForm id={player.id} active={player.active} action={togglePlayerActive} /></dd></div>
+              <div className="border-b pb-3"><dt className="text-muted-foreground">Last completed appearance</dt><dd className="mt-1 font-medium">{latest ? <Link className="hover:underline" href={`/fixtures/${latest.fixtureId}`}>{formatDate(latest.fixtureDate)} · {latest.venueName}</Link> : historyAvailable ? "No completed appearances" : "Unavailable"}</dd></div>
+              <div><dt className="text-muted-foreground">Contact details</dt><dd className="mt-2 space-y-2">
+                {player.email && <div className="flex items-center gap-2"><MailIcon className="size-4 shrink-0" /><span className="min-w-0 [overflow-wrap:anywhere]">{player.email}</span></div>}
+                {player.phone && <div className="flex items-center gap-2"><PhoneIcon className="size-4 shrink-0" />{player.phone}</div>}
+                {!player.email && !player.phone && <span>No contact information provided.</span>}
+              </dd></div>
+            </dl>
+            <div className="mt-6 flex flex-wrap gap-1">{form.length ? form.map((match) => <span key={match.id} className="desk-status" data-tone={match.result === "win" ? "home" : match.result === "loss" ? "danger" : "neutral"} title={`${formatDate(match.fixtureDate)}: ${match.result}`}>{match.result === "win" ? "W" : match.result === "loss" ? "L" : "H"}</span>) : <span className="text-sm text-muted-foreground">No recent form recorded.</span>}</div>
+            <div className="desk-panel-footer">Oldest → newest · W win / H halved / L loss. Active status is not a record of fixture availability.</div>
+          </aside>
+        </div>
+        <section className="desk-panel"><PanelHeader title="Recent form" description={`Last ${form.length} completed appearances, newest first. Historical unknown handicaps remain blank (—).`} /><MatchTable matches={recentMatches} player={player} /></section>
+      </TabsContent>
 
-      {/* Top cards: Player Info + Stats Summary */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Player Information</CardTitle>
-            <CardDescription>Personal details and handicap</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Handicap</p>
-                <p className="text-lg font-semibold">
-                  {player.defaultHandicap}
-                </p>
-              </div>
-            </div>
-            <Separator />
-            <div className="space-y-3">
-              {player.email && (
-                <div className="flex items-center gap-2 text-sm">
-                  <MailIcon className="size-4 text-muted-foreground" />
-                  <span>{player.email}</span>
-                </div>
-              )}
-              {player.phone && (
-                <div className="flex items-center gap-2 text-sm">
-                  <PhoneIcon className="size-4 text-muted-foreground" />
-                  <span>{player.phone}</span>
-                </div>
-              )}
-              {!player.email && !player.phone && (
-                <p className="text-sm text-muted-foreground">
-                  No contact information provided.
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+      <TabsContent value="history"><section className="desk-panel"><PanelHeader title="A record, match by match." description={`${matchHistory.length} matches in the selected scope, newest first, including pending results.${scope === "all" ? " Internal fixtures included." : " Internal fixtures excluded."}`} /><MatchTable matches={matchHistory} player={player} /><div className="desk-panel-footer">Handicaps belong to their original scorecards. An unknown historical handicap is shown as —, never replaced with the current default.</div></section></TabsContent>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BarChart3Icon className="size-4" />
-              Performance Stats
-            </CardTitle>
-            <CardDescription>Season statistics and trends</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {matchHistory.length > 0 ? (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    Matches Played
-                  </p>
-                  <p className="text-2xl font-bold">{stats.played}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Win Rate</p>
-                  <p className="text-2xl font-bold">
-                    {(stats.winRate * 100).toFixed(1)}%
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-sm text-muted-foreground mb-2">Record</p>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="default"
-                      className="bg-emerald-500 hover:bg-emerald-600"
-                    >
-                      {stats.wins}W
-                    </Badge>
-                    <Badge variant="destructive">{stats.losses}L</Badge>
-                    <Badge variant="outline">{stats.halved}H</Badge>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground py-8 text-center">
-                Performance statistics will appear here once matches are
-                recorded.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <TabsContent value="partners" className="space-y-5">
+        <section className="desk-panel"><PanelHeader title="Partnerships" description="Completed appearances with linked squad partners. Yield includes half of halved matches." />
+          <Table><TableHeader><TableRow><TableHead>Partner</TableHead><TableHead>Played</TableHead><TableHead>W / H / L</TableHead><TableHead>Result yield</TableHead></TableRow></TableHeader><TableBody>{stats.partners.length ? stats.partners.map((partner) => <TableRow key={partner.partnerId}><TableCell><PartnerLink id={partner.partnerId} name={partner.partnerName} /></TableCell><TableCell>{partner.played}</TableCell><TableCell>{partner.wins} / {partner.halved} / {partner.played - partner.wins - partner.halved}</TableCell><TableCell>{(partner.winRate * 100).toFixed(1)}%</TableCell></TableRow>) : <TableRow><TableCell colSpan={4} className="py-10 text-center text-muted-foreground">No completed matches with linked squad partners.</TableCell></TableRow>}</TableBody></Table>
+        </section>
+        <section className="desk-panel"><PanelHeader title="Pairings and opponent matchups" description="The complete pairing record, including partners who are not linked to the squad." /><MatchTable matches={matchHistory} player={player} /></section>
+      </TabsContent>
 
-      {/* Tabbed sections */}
-      {hasMatches ? (
-        <Tabs defaultValue="overview">
-          <TabsList variant="line">
-            <TabsTrigger value="overview">
-              <TrendingUpIcon className="size-4" />
-              Overview
-            </TabsTrigger>
-            <TabsTrigger value="partners">
-              <UsersIcon className="size-4" />
-              Pairings
-            </TabsTrigger>
-            <TabsTrigger value="venues">
-              <MapPinIcon className="size-4" />
-              Venues
-            </TabsTrigger>
-            <TabsTrigger value="history">
-              <HistoryIcon className="size-4" />
-              Match History
-            </TabsTrigger>
-          </TabsList>
+      <TabsContent value="handicaps"><section className="desk-panel">
+        <PanelHeader title="The handicap journey." description="Historical scorecard snapshots, not a connected handicap service." />
+        {handicapTrend.length > 1 && <PlayerHandicapChart points={handicapTrend} />}
+        <Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Recorded handicap</TableHead><TableHead>Result</TableHead></TableRow></TableHeader><TableBody>{handicapTrend.length ? handicapTrend.map((point, index) => <TableRow key={`${point.date}-${index}`}><TableCell>{formatDate(point.date)}</TableCell><TableCell>{point.handicap.toFixed(1)}</TableCell><TableCell><ResultBadge result={point.result} /></TableCell></TableRow>) : <TableRow><TableCell colSpan={3} className="py-10 text-center text-muted-foreground">No completed matches with a known player handicap.</TableCell></TableRow>}</TableBody></Table>
+        <div className="desk-panel-footer">Current default: {player.defaultHandicap.toFixed(1)}. Excludes {handicapTrendExcluded} completed match{handicapTrendExcluded === 1 ? "" : "es"} with an unknown player handicap, and all pending results. Chart dots: green win, red loss, amber halved.</div>
+      </section></TabsContent>
 
-          {/* Overview tab: Handicap Trend + Recent Form */}
-          <TabsContent value="overview" className="space-y-6">
-            <p className="text-xs text-muted-foreground">
-              Handicap trend excludes {handicapTrendExcluded} completed match{handicapTrendExcluded === 1 ? "" : "es"} with an unknown player handicap, and all pending results.
-            </p>
-            {/* Handicap Trend Chart */}
-            {handicapTrend.length > 1 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUpIcon className="size-4" />
-                    Handicap Trend
-                  </CardTitle>
-                  <CardDescription>
-                    Handicap over time —{" "}
-                    <span className="text-emerald-500">●</span> win{" "}
-                    <span className="text-red-500">●</span> loss{" "}
-                    <span className="text-amber-500">●</span> halved
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart
-                        data={handicapTrend}
-                        margin={{ top: 5, right: 20, bottom: 5, left: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                        <XAxis
-                          dataKey="date"
-                          tickFormatter={formatShortDate}
-                          fontSize={12}
-                        />
-                        <YAxis
-                          domain={["dataMin - 1", "dataMax + 1"]}
-                          fontSize={12}
-                        />
-                        <Tooltip
-                          labelFormatter={(label) =>
-                            formatDate(String(label))
-                          }
-                          formatter={(value) => [
-                            Number(value).toFixed(1),
-                            "Handicap",
-                          ]}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="handicap"
-                          stroke="#10b981"
-                          strokeWidth={2}
-                          dot={<CustomDot />}
-                          activeDot={{ r: 6 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Recent Form */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrophyIcon className="size-4" />
-                  Recent Form
-                </CardTitle>
-                <CardDescription>
-                  Last {form.length} matches
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {form.length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Opponent Club</TableHead>
-                        <TableHead>Pairing</TableHead>
-                        <TableHead>vs Opponents</TableHead>
-                        <TableHead>Result</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {form.map((m) => (
-                        <TableRow key={m.id}>
-                          <TableCell>{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell>{m.opponentClubName}<span className="block text-xs text-muted-foreground">{m.venueName}</span></TableCell>
-                          <TableCell>
-                            <span className="font-medium">{player.name}</span>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap ?? "—"})</span>
-                            {" / "}
-                            <Link
-                              href={`/players/${m.partnerId}`}
-                              className="text-primary hover:underline"
-                            >
-                              {m.partnerName}
-                            </Link>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap ?? "—"})</span>
-                          </TableCell>
-                          <TableCell>
-                            {m.opponent1Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap ?? "—"})</span>
-                            {" / "}
-                            {m.opponent2Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap ?? "—"})</span>
-                          </TableCell>
-                          <TableCell>
-                            <ResultBadge result={m.result} />
-                            {m.margin && (
-                              <span className="ml-1.5 text-xs text-muted-foreground">{m.margin}</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-4 text-center">
-                    No recent matches.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Pairings tab */}
-          <TabsContent value="partners">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <UsersIcon className="size-4" />
-                  Pairings
-                </CardTitle>
-                <CardDescription>
-                  Match pairings and opponent matchups
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {matchHistory.length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>vs</TableHead>
-                        <TableHead>Pairing</TableHead>
-                        <TableHead>Opponents</TableHead>
-                        <TableHead>Result</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {matchHistory.map((m) => (
-                        <TableRow key={m.id}>
-                          <TableCell className="text-xs">{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell className="text-xs">{m.opponentClubName}<span className="block text-xs text-muted-foreground">{m.venueName}</span></TableCell>
-                          <TableCell>
-                            <span className="font-medium">{player.name}</span>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap ?? "—"})</span>
-                            {" / "}
-                            <Link
-                              href={`/players/${m.partnerId}`}
-                              className="text-primary hover:underline"
-                            >
-                              {m.partnerName}
-                            </Link>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap ?? "—"})</span>
-                          </TableCell>
-                          <TableCell>
-                            {m.opponent1Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap ?? "—"})</span>
-                            {" / "}
-                            {m.opponent2Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap ?? "—"})</span>
-                          </TableCell>
-                          <TableCell>
-                            <ResultBadge result={m.result} />
-                            {m.margin && (
-                              <span className="ml-1.5 text-xs text-muted-foreground">{m.margin}</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-8 text-center">
-                    No pairing data available.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Venues tab */}
-          <TabsContent value="venues">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <MapPinIcon className="size-4" />
-                  Venue Performance
-                </CardTitle>
-                <CardDescription>
-                  Record at each venue
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {venueStats.length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Venue</TableHead>
-                        <TableHead className="text-center">Played</TableHead>
-                        <TableHead className="text-center">W</TableHead>
-                        <TableHead className="text-center">L</TableHead>
-                        <TableHead className="text-center">H</TableHead>
-                        <TableHead className="text-center">Win Rate</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {venueStats.map((v) => (
-                        <TableRow key={v.venueName}>
-                          <TableCell className="font-medium">
-                            {v.venueName}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {v.played}
-                          </TableCell>
-                          <TableCell className="text-center text-emerald-600">
-                            {v.wins}
-                          </TableCell>
-                          <TableCell className="text-center text-red-600">
-                            {v.losses}
-                          </TableCell>
-                          <TableCell className="text-center text-amber-600">
-                            {v.halved}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <Badge
-                              variant={
-                                v.winRate >= 0.5 ? "default" : "secondary"
-                              }
-                              className={
-                                v.winRate >= 0.5
-                                  ? "bg-emerald-500 hover:bg-emerald-600"
-                                  : ""
-                              }
-                            >
-                              {(v.winRate * 100).toFixed(0)}%
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-8 text-center">
-                    No venue data available.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Match History tab */}
-          <TabsContent value="history">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <HistoryIcon className="size-4" />
-                  Match History
-                </CardTitle>
-                <CardDescription>
-                  All {matchHistory.length} matches — newest first
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {matchHistory.length > 0 ? (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Opponent Club</TableHead>
-                        <TableHead>Pairing</TableHead>
-                        <TableHead>vs Opponents</TableHead>
-                        <TableHead>Result</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {matchHistory.map((m) => (
-                        <TableRow key={m.id}>
-                          <TableCell>{formatDate(m.fixtureDate)}</TableCell>
-                          <TableCell>{m.opponentClubName}<span className="block text-xs text-muted-foreground">{m.venueName}</span></TableCell>
-                          <TableCell>
-                            <span className="font-medium">{player.name}</span>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.playerHandicap ?? "—"})</span>
-                            {" / "}
-                            <Link
-                              href={`/players/${m.partnerId}`}
-                              className="text-primary hover:underline"
-                            >
-                              {m.partnerName}
-                            </Link>
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.partnerHandicap ?? "—"})</span>
-                          </TableCell>
-                          <TableCell>
-                            {m.opponent1Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent1Handicap ?? "—"})</span>
-                            {" / "}
-                            {m.opponent2Name}
-                            <span className="text-muted-foreground text-xs ml-0.5">({m.opponent2Handicap ?? "—"})</span>
-                          </TableCell>
-                          <TableCell>
-                            <ResultBadge result={m.result} />
-                            {m.margin && (
-                              <span className="ml-1.5 text-xs text-muted-foreground">{m.margin}</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-8 text-center">
-                    No matches recorded yet.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrophyIcon className="size-4" />
-              Match History
-            </CardTitle>
-            <CardDescription>Past match results and pairings</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground py-8 text-center">
-              Match history will appear here once matches are recorded.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      <Dialog
-        open={editDialogOpen}
-        onOpenChange={(open) => setEditDialogOpen(open)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Player</DialogTitle>
-            <DialogDescription>
-              Update {player.name}&apos;s details.
-            </DialogDescription>
-          </DialogHeader>
-          <PlayerForm
-            defaultValues={player}
-            onSubmit={handleUpdate}
-            submitLabel="Update Player"
-          />
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+      <TabsContent value="venues"><section className="desk-panel"><PanelHeader title="Venue performance" description="Completed-match records at each recorded venue, including both-side appearances." />
+        <Table><TableHeader><TableRow><TableHead>Venue</TableHead><TableHead>Played</TableHead><TableHead>W</TableHead><TableHead>H</TableHead><TableHead>L</TableHead><TableHead>Result yield</TableHead></TableRow></TableHeader><TableBody>{venueStats.length ? venueStats.map((venue) => <TableRow key={venue.venueName}><TableCell className="font-medium">{venue.venueName}</TableCell><TableCell>{venue.played}</TableCell><TableCell>{venue.wins}</TableCell><TableCell>{venue.halved}</TableCell><TableCell>{venue.losses}</TableCell><TableCell>{(venue.winRate * 100).toFixed(1)}%</TableCell></TableRow>) : <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No completed venue records available.</TableCell></TableRow>}</TableBody></Table>
+      </section></TabsContent>
+    </Tabs>
+    <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}><DialogContent><DialogHeader><DialogTitle>Edit player</DialogTitle><DialogDescription>Update {player.name}&apos;s details. Historical scorecards are unchanged.</DialogDescription></DialogHeader><PlayerForm defaultValues={player} onSubmit={handleUpdate} submitLabel="Save changes" /></DialogContent></Dialog>
+  </div>;
 }

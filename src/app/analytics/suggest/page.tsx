@@ -4,6 +4,8 @@ import { asc, eq } from "drizzle-orm";
 import { getAllMatches } from "@/lib/actions";
 import type { MatchWithDetails } from "@/lib/analytics";
 import { SuggestClient } from "./suggest-client";
+import { getDataScope } from "@/lib/data-scope";
+import { selectMatchesByScope } from "@/lib/insights";
 
 export default async function SuggestPage() {
   const activePlayers = await db
@@ -17,14 +19,16 @@ export default async function SuggestPage() {
     .from(opponentClubs)
     .orderBy(asc(opponentClubs.name));
 
-  const result = await getAllMatches();
-  const allMatches = (result.data ?? []) as MatchWithDetails[];
+  const [result, scope] = await Promise.all([getAllMatches(), getDataScope()]);
+  const allMatches = selectMatchesByScope((result.data ?? []) as MatchWithDetails[], scope);
 
   return (
     <SuggestClient
+      scope={scope}
       players={activePlayers}
       clubs={allClubs}
       allMatches={allMatches}
+      historyError={!result.success}
     />
   );
 }

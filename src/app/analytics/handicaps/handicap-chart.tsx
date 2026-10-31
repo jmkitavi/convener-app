@@ -14,15 +14,15 @@ import {
 import type { HandicapBucket } from "@/lib/analytics";
 
 const COLORS = {
-  wins: "#059669",
-  losses: "#f87171",
-  halved: "#fbbf24",
+  wins: "#477c6a",
+  losses: "#223f50",
+  halved: "#d59c48",
 };
 
-export function HandicapChart({ buckets }: { buckets: HandicapBucket[] }) {
+export function HandicapChart({ buckets, mode = "both" }: { buckets: HandicapBucket[]; mode?: "both" | "samples" }) {
   const data = buckets.map((b) => ({
     name: b.label,
-    "Win Rate %": b.played > 0 ? Math.round(b.winRate * 1000) / 10 : 0,
+    "Result yield %": b.played > 0 ? Math.round(((b.wins + b.halved * 0.5) / b.played) * 1000) / 10 : null,
     Wins: b.wins,
     Losses: b.losses,
     Halved: b.halved,
@@ -40,8 +40,7 @@ export function HandicapChart({ buckets }: { buckets: HandicapBucket[] }) {
 
   return (
     <div className="space-y-6">
-      {/* Win rate bar chart */}
-      <div className="h-64">
+      {mode === "both" && <div className="h-64 min-w-0" role="img" aria-label="Result yield by recorded index gap; exact values and samples are in the full bucket records table.">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" />
@@ -52,27 +51,26 @@ export function HandicapChart({ buckets }: { buckets: HandicapBucket[] }) {
               fontSize={12}
             />
             <Tooltip formatter={(value) => `${value}%`} />
-            <Bar dataKey="Win Rate %" radius={[4, 4, 0, 0]}>
+            <Bar dataKey="Result yield %" radius={[4, 4, 0, 0]}>
               {data.map((entry, index) => (
                 <Cell
                   key={index}
                   fill={
-                    entry["Win Rate %"] >= 50 ? COLORS.wins : COLORS.losses
+                    (entry["Result yield %"] ?? 0) >= 50 ? COLORS.wins : COLORS.losses
                   }
                 />
               ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
-      </div>
+      </div>}
 
-      {/* Stacked W/L/H chart */}
-      <div className="h-64">
+      <div className="h-64 min-w-0" role="img" aria-label="Wins, halves and losses by recorded index gap; exact counts are in the full bucket records table.">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="name" fontSize={12} />
-            <YAxis fontSize={12} />
+            <YAxis fontSize={12} allowDecimals={false} />
             <Tooltip />
             <Legend />
             <Bar
