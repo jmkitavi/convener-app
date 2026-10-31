@@ -1,5 +1,5 @@
-import { db } from "./index";
-import { matches } from "./schema";
+import { db } from "./legacy-index";
+import { matches } from "./legacy-schema";
 
 // Thika Sports Club opponent names
 const thikaOpponents = [

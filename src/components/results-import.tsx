@@ -134,8 +134,19 @@ export function ResultsImport() {
 
   async function upload() {
     if (!file || !consent) return;
-    const form = new FormData(); form.set("file", file);
-    const uploaded = await request<{ id: string; repeated: boolean }>(base, "POST", form);
+    if (!file.size || file.size > 20 * 1024 * 1024) throw new Error("File must be between 1 byte and 20 MB.");
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    if (!extension || !["pdf", "jpg", "jpeg", "png"].includes(extension)) throw new Error("Choose a PDF, JPEG or PNG.");
+    const reserved = await request<{ id: string }>(`${base}/upload`, "POST", {});
+    try {
+      const issued = await request<{ token: string; pathname: string; contentType: string }>(`${base}/${reserved.id}/token`, "POST", { extension });
+      const { put } = await import("@vercel/blob/client");
+      await put(issued.pathname, file, { access: "private", token: issued.token, contentType: issued.contentType });
+    } catch (error) {
+      await request(`${base}/${reserved.id}`, "DELETE").catch(() => {});
+      throw error;
+    }
+    const uploaded = await request<{ id: string; repeated: boolean }>(base, "POST", { id: reserved.id });
     const url = new URL(window.location.href);
     url.searchParams.set("import", uploaded.id);
     if (uploadFixtureId) url.searchParams.set("fixtureId", uploadFixtureId);
@@ -184,7 +195,7 @@ export function ResultsImport() {
     {!options ? <p role="status" className="desk-panel p-5 text-sm text-muted-foreground">{error ? "Import settings could not be loaded. Refresh this page to retry." : "Loading import settings…"}</p> : !review ? <div className="desk-two-column"><section className="desk-panel">
       <div className="desk-panel-header"><h2 className="flex items-center gap-2 font-semibold"><FileUp className="size-5 text-primary" aria-hidden="true" />Upload a results sheet</h2><p className="text-sm text-muted-foreground">Choose the source, then check every extracted row.</p></div>
       <div className="desk-stack">
-      {!options.configured && <p className="data-note attention-note">Set OPENAI_API_KEY in .env.local and restart the app before importing.</p>}
+      {!options.configured && <p className="data-note attention-note">Configure the server&apos;s OPENAI_API_KEY before importing.</p>}
       {!draft && <label className={labelClass}>Attach to fixture<select className={selectClass} value={uploadFixtureId} disabled={Boolean(busy)} onChange={(event) => setUploadFixtureId(event.target.value)}><option value="">Choose after extraction / create new</option>{options.fixtures.map((fixture) => <option key={fixture.id} value={fixture.id}>{fixture.date} · {fixture.opponentTeamName || fixture.clubName} · {fixture.homeAway}</option>)}</select></label>}
       <p className="text-sm">One PDF, JPEG or PNG; up to 20 MB and 5 PDF pages. Temporary review images are capped at 1 MB per page and deleted after saving, cancellation or expiry (24 hours).</p>
       {draft && <p>Import status: {draft.status}. {draft.data.extractionError}</p>}

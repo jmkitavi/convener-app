@@ -8,7 +8,7 @@ import {
   players,
 } from "@/db/schema";
 import { eq, asc, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { alias } from "drizzle-orm/pg-core";
 import { revalidatePath } from "next/cache";
 import {
   Card,
@@ -87,7 +87,7 @@ export default async function FixtureDetailPage({
     .leftJoin(p1, eq(matches.player1Id, p1.id))
     .leftJoin(p2, eq(matches.player2Id, p2.id))
     .where(eq(matches.fixtureId, fixtureId))
-    .orderBy(asc(matches.matchOrder), asc(matches.id));
+    .orderBy(sql`${matches.matchOrder} ASC NULLS FIRST`, asc(matches.id));
 
   const activePlayers = await db
     .select({
@@ -155,7 +155,7 @@ export default async function FixtureDetailPage({
       ...(o1Id ? [Number(o1Id)] : []),
       ...(o2Id ? [Number(o2Id)] : []),
     ];
-    syncPlayerHandicaps(db.$client, playerIds);
+    await syncPlayerHandicaps(db.$client, playerIds);
 
     revalidatePath(`/fixtures/${fId}`);
     revalidatePath("/", "layout");
@@ -168,9 +168,9 @@ export default async function FixtureDetailPage({
     const matchId = Number(formData.get("matchId"));
     const fId = Number(formData.get("fixtureId"));
 
-    const previous = db.select().from(matches).where(eq(matches.id, matchId)).get();
+    const previous = (await db.select().from(matches).where(eq(matches.id, matchId)))[0];
     await db.delete(matches).where(eq(matches.id, matchId));
-    if (previous) syncPlayerHandicaps(db.$client, [
+    if (previous) await syncPlayerHandicaps(db.$client, [
       previous.player1Id, previous.player2Id,
       ...[previous.opponent1Id, previous.opponent2Id].filter((id): id is number => id !== null),
     ]);
@@ -194,7 +194,7 @@ export default async function FixtureDetailPage({
       throw new Error("Both players must be selected");
     }
 
-    const previous = db.select().from(matches).where(eq(matches.id, matchId)).get();
+    const previous = (await db.select().from(matches).where(eq(matches.id, matchId)))[0];
     await db
       .update(matches)
       .set({
@@ -227,7 +227,7 @@ export default async function FixtureDetailPage({
     if (previous) playerIds.push(...[
       previous.player1Id, previous.player2Id, previous.opponent1Id, previous.opponent2Id,
     ].filter((id): id is number => id !== null));
-    syncPlayerHandicaps(db.$client, playerIds);
+    await syncPlayerHandicaps(db.$client, playerIds);
 
     revalidatePath(`/fixtures/${fId}`);
     revalidatePath("/", "layout");

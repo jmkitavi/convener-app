@@ -9,7 +9,7 @@ import {
   opponentLineups,
   opponentLineupPairs,
 } from "@/db/schema";
-import { eq, desc, asc, and, or, sql } from "drizzle-orm";
+import { eq, desc, asc, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { syncPlayerHandicaps } from "@/lib/handicaps";
 
@@ -28,7 +28,7 @@ export async function createPlayer(data: {
   defaultHandicap?: number;
 }) {
   try {
-    const result = db
+    const result = (await db
       .insert(players)
       .values({
         name: data.name,
@@ -36,8 +36,7 @@ export async function createPlayer(data: {
         phone: data.phone ?? null,
         defaultHandicap: data.defaultHandicap ?? 18,
       })
-      .returning()
-      .get();
+      .returning())[0];
     revalidatePath("/", "layout");
     revalidatePath("/players");
     return { success: true, data: result };
@@ -57,12 +56,11 @@ export async function updatePlayer(
   },
 ) {
   try {
-    const result = db
+    const result = (await db
       .update(players)
       .set(data)
       .where(eq(players.id, id))
-      .returning()
-      .get();
+      .returning())[0];
     revalidatePath("/", "layout");
     revalidatePath("/players");
     revalidatePath(`/players/${id}`);
@@ -74,19 +72,17 @@ export async function updatePlayer(
 
 export async function togglePlayerActive(id: number) {
   try {
-    const player = db
+    const player = (await db
       .select()
       .from(players)
-      .where(eq(players.id, id))
-      .get();
+      .where(eq(players.id, id)))[0];
     if (!player) return { success: false, error: "Player not found" };
 
-    const result = db
+    const result = (await db
       .update(players)
       .set({ active: !player.active })
       .where(eq(players.id, id))
-      .returning()
-      .get();
+      .returning())[0];
     revalidatePath("/", "layout");
     revalidatePath("/players");
     revalidatePath(`/players/${id}`);
@@ -99,13 +95,12 @@ export async function togglePlayerActive(id: number) {
 export async function getPlayers(activeOnly = false) {
   try {
     const query = activeOnly
-      ? db
+      ? await db
           .select()
           .from(players)
           .where(eq(players.active, true))
           .orderBy(asc(players.name))
-          .all()
-      : db.select().from(players).orderBy(asc(players.name)).all();
+      : await db.select().from(players).orderBy(asc(players.name));
     return { success: true, data: query };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as (typeof players.$inferSelect)[] };
@@ -114,11 +109,10 @@ export async function getPlayers(activeOnly = false) {
 
 export async function getPlayer(id: number) {
   try {
-    const result = db
+    const result = (await db
       .select()
       .from(players)
-      .where(eq(players.id, id))
-      .get();
+      .where(eq(players.id, id)))[0];
     if (!result) return { success: false, error: "Player not found" };
     return { success: true, data: result };
   } catch (e) {
@@ -137,7 +131,7 @@ export async function createClub(data: {
   courseRating?: number;
 }) {
   try {
-    const result = db
+    const result = (await db
       .insert(opponentClubs)
       .values({
         name: data.name,
@@ -145,8 +139,7 @@ export async function createClub(data: {
         slopeRating: data.slopeRating ?? null,
         courseRating: data.courseRating ?? null,
       })
-      .returning()
-      .get();
+      .returning())[0];
     revalidatePath("/", "layout");
     revalidatePath("/clubs");
     return { success: true, data: result };
@@ -165,12 +158,11 @@ export async function updateClub(
   },
 ) {
   try {
-    const result = db
+    const result = (await db
       .update(opponentClubs)
       .set(data)
       .where(eq(opponentClubs.id, id))
-      .returning()
-      .get();
+      .returning())[0];
     revalidatePath("/", "layout");
     revalidatePath("/clubs");
     revalidatePath(`/clubs/${id}`);
@@ -182,18 +174,17 @@ export async function updateClub(
 
 export async function deleteClub(id: number) {
   try {
-    const fixtureUsingClub = db
+    const fixtureUsingClub = (await db
       .select({ id: fixtures.id })
       .from(fixtures)
-      .where(eq(fixtures.opponentClubId, id))
-      .get();
+      .where(eq(fixtures.opponentClubId, id)))[0];
     if (fixtureUsingClub) {
       return {
         success: false,
         error: "Cannot delete club that is referenced by a fixture",
       };
     }
-    db.delete(opponentClubs).where(eq(opponentClubs.id, id)).run();
+    await db.delete(opponentClubs).where(eq(opponentClubs.id, id));
     revalidatePath("/", "layout");
     revalidatePath("/clubs");
     return { success: true };
@@ -204,11 +195,10 @@ export async function deleteClub(id: number) {
 
 export async function getClubs() {
   try {
-    const result = db
+    const result = await db
       .select()
       .from(opponentClubs)
-      .orderBy(asc(opponentClubs.name))
-      .all();
+      .orderBy(asc(opponentClubs.name));
     return { success: true, data: result };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as (typeof opponentClubs.$inferSelect)[] };
@@ -217,11 +207,10 @@ export async function getClubs() {
 
 export async function getClub(id: number) {
   try {
-    const result = db
+    const result = (await db
       .select()
       .from(opponentClubs)
-      .where(eq(opponentClubs.id, id))
-      .get();
+      .where(eq(opponentClubs.id, id)))[0];
     if (!result) return { success: false, error: "Club not found" };
     return { success: true, data: result };
   } catch (e) {
@@ -243,7 +232,7 @@ export async function createFixture(data: {
   notes?: string;
 }) {
   try {
-    const result = db
+    const result = (await db
       .insert(fixtures)
       .values({
         date: data.date,
@@ -254,8 +243,7 @@ export async function createFixture(data: {
         opponentTeamName: data.opponentTeamName?.trim() || null,
         notes: data.notes ?? null,
       })
-      .returning()
-      .get();
+      .returning())[0];
     revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     return { success: true, data: result };
@@ -277,7 +265,7 @@ export async function updateFixture(
   },
 ) {
   try {
-    const result = db
+    const result = (await db
       .update(fixtures)
       .set({
         ...data,
@@ -286,8 +274,7 @@ export async function updateFixture(
         ...(data.opponentTeamName !== undefined ? { opponentTeamName: data.opponentTeamName?.trim() || null } : {}),
       })
       .where(eq(fixtures.id, id))
-      .returning()
-      .get();
+      .returning())[0];
     revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     revalidatePath(`/fixtures/${id}`);
@@ -300,7 +287,7 @@ export async function updateFixture(
 export async function deleteFixture(id: number) {
   try {
     // Matches cascade-delete via FK, so just delete the fixture
-    db.delete(fixtures).where(eq(fixtures.id, id)).run();
+    await db.delete(fixtures).where(eq(fixtures.id, id));
     revalidatePath("/", "layout");
     revalidatePath("/fixtures");
     return { success: true };
@@ -311,11 +298,10 @@ export async function deleteFixture(id: number) {
 
 export async function getFixtures() {
   try {
-    const result = db
+    const result = await db
       .select()
       .from(fixtures)
-      .orderBy(asc(fixtures.date))
-      .all();
+      .orderBy(asc(fixtures.date));
     return { success: true, data: result };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as (typeof fixtures.$inferSelect)[] };
@@ -324,11 +310,10 @@ export async function getFixtures() {
 
 export async function getFixture(id: number) {
   try {
-    const result = db
+    const result = (await db
       .select()
       .from(fixtures)
-      .where(eq(fixtures.id, id))
-      .get();
+      .where(eq(fixtures.id, id)))[0];
     if (!result) return { success: false, error: "Fixture not found" };
     return { success: true, data: result };
   } catch (e) {
@@ -338,7 +323,7 @@ export async function getFixture(id: number) {
 
 export async function getFixtureWithDetails(id: number) {
   try {
-    const result = db
+    const result = (await db
       .select({
         id: fixtures.id,
         date: fixtures.date,
@@ -357,8 +342,7 @@ export async function getFixtureWithDetails(id: number) {
       })
       .from(fixtures)
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-      .where(eq(fixtures.id, id))
-      .get();
+      .where(eq(fixtures.id, id)))[0];
     if (!result) return { success: false, error: "Fixture not found" };
     return { success: true, data: result };
   } catch (e) {
@@ -368,7 +352,7 @@ export async function getFixtureWithDetails(id: number) {
 
 export async function getFixturesWithDetails() {
   try {
-    const result = db
+    const result = await db
       .select({
         id: fixtures.id,
         date: fixtures.date,
@@ -384,8 +368,7 @@ export async function getFixturesWithDetails() {
       })
       .from(fixtures)
       .innerJoin(opponentClubs, eq(fixtures.opponentClubId, opponentClubs.id))
-      .orderBy(asc(fixtures.date))
-      .all();
+      .orderBy(asc(fixtures.date));
     return { success: true, data: result };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as Array<{
@@ -426,7 +409,7 @@ export async function createMatch(data: {
   notes?: string;
 }) {
   try {
-    const result = db
+    const result = (await db
       .insert(matches)
       .values({
         fixtureId: data.fixtureId,
@@ -445,9 +428,8 @@ export async function createMatch(data: {
         matchOrder: data.matchOrder ?? null,
         notes: data.notes ?? null,
       })
-      .returning()
-      .get();
-    syncPlayerHandicaps(db.$client, [data.player1Id, data.player2Id, data.opponent1Id, data.opponent2Id].filter((id): id is number => id != null));
+      .returning())[0];
+    await syncPlayerHandicaps(db.$client, [data.player1Id, data.player2Id, data.opponent1Id, data.opponent2Id].filter((id): id is number => id != null));
     revalidatePath("/", "layout");
     revalidatePath(`/fixtures/${data.fixtureId}`);
     revalidatePath("/fixtures");
@@ -477,15 +459,14 @@ export async function updateMatch(
   },
 ) {
   try {
-    const previous = db.select().from(matches).where(eq(matches.id, id)).get();
-    const result = db
+    const previous = (await db.select().from(matches).where(eq(matches.id, id)))[0];
+    const result = (await db
       .update(matches)
       .set(data)
       .where(eq(matches.id, id))
-      .returning()
-      .get();
+      .returning())[0];
     if (result) {
-      syncPlayerHandicaps(db.$client, [previous, result].flatMap((match) => match
+      await syncPlayerHandicaps(db.$client, [previous, result].flatMap((match) => match
         ? [match.player1Id, match.player2Id, match.opponent1Id, match.opponent2Id].filter((id): id is number => id != null)
         : []));
       revalidatePath(`/fixtures/${result.fixtureId}`);
@@ -500,14 +481,13 @@ export async function updateMatch(
 
 export async function deleteMatch(id: number) {
   try {
-    const match = db
+    const match = (await db
       .select()
       .from(matches)
-      .where(eq(matches.id, id))
-      .get();
-    db.delete(matches).where(eq(matches.id, id)).run();
+      .where(eq(matches.id, id)))[0];
+    await db.delete(matches).where(eq(matches.id, id));
     if (match) {
-      syncPlayerHandicaps(db.$client, [match.player1Id, match.player2Id, match.opponent1Id, match.opponent2Id].filter((id): id is number => id != null));
+      await syncPlayerHandicaps(db.$client, [match.player1Id, match.player2Id, match.opponent1Id, match.opponent2Id].filter((id): id is number => id != null));
       revalidatePath(`/fixtures/${match.fixtureId}`);
     }
     revalidatePath("/", "layout");
@@ -536,7 +516,7 @@ export async function getMatchesByFixture(fixtureId: number) {
       .from(players)
       .as("p2");
 
-    const result = db
+    const result = await db
       .select({
         id: matches.id,
         fixtureId: matches.fixtureId,
@@ -561,8 +541,7 @@ export async function getMatchesByFixture(fixtureId: number) {
       .innerJoin(p1, eq(matches.player1Id, p1.id))
       .innerJoin(p2, eq(matches.player2Id, p2.id))
       .where(eq(matches.fixtureId, fixtureId))
-      .orderBy(asc(matches.matchOrder))
-      .all();
+      .orderBy(sql`${matches.matchOrder} ASC NULLS FIRST`)
     return { success: true, data: result };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as Array<Record<string, unknown>> };
@@ -571,7 +550,7 @@ export async function getMatchesByFixture(fixtureId: number) {
 
 export async function getMatchesByPlayer(playerId: number) {
   try {
-    const result = db
+    const result = await db
       .select({
         id: matches.id,
         fixtureId: matches.fixtureId,
@@ -604,8 +583,7 @@ export async function getMatchesByPlayer(playerId: number) {
           eq(matches.opponent2Id, playerId),
         ),
       )
-      .orderBy(desc(fixtures.date))
-      .all();
+      .orderBy(desc(fixtures.date));
     return { success: true, data: result };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as Array<Record<string, unknown>> };
@@ -650,7 +628,7 @@ export async function getAllMatches() {
       .from(players)
       .as("o2");
 
-    const result = db
+    const result = await db
       .select({
         id: matches.id,
         fixtureId: matches.fixtureId,
@@ -685,8 +663,7 @@ export async function getAllMatches() {
       .innerJoin(p2, eq(matches.player2Id, p2.id))
       .leftJoin(o1, eq(matches.opponent1Id, o1.id))
       .leftJoin(o2, eq(matches.opponent2Id, o2.id))
-      .orderBy(desc(fixtures.date), asc(matches.matchOrder))
-      .all();
+      .orderBy(desc(fixtures.date), sql`${matches.matchOrder} ASC NULLS FIRST`)
     return { success: true, data: result };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] as Array<Record<string, unknown>> };
@@ -711,18 +688,17 @@ export async function saveLineup(data: {
   }[];
 }): Promise<ActionResult<{ id: number }>> {
   try {
-    const lineup = db
+    const lineup = (await db
       .insert(opponentLineups)
       .values({
         name: data.name,
         fixtureId: data.fixtureId ?? null,
         clubId: data.clubId ?? null,
       })
-      .returning()
-      .get();
+      .returning())[0];
 
     if (data.pairs.length > 0) {
-      db.insert(opponentLineupPairs)
+      await db.insert(opponentLineupPairs)
         .values(
           data.pairs.map((p) => ({
             lineupId: lineup.id,
@@ -733,8 +709,7 @@ export async function saveLineup(data: {
             opp2Handicap: p.opp2Handicap,
             isRedMatch: p.isRedMatch,
           })),
-        )
-        .run();
+        );
     }
 
     revalidatePath("/analytics/counter");
@@ -758,7 +733,7 @@ export async function getLineups(): Promise<
   >
 > {
   try {
-    const rows = db
+    const rows = await db
       .select({
         id: opponentLineups.id,
         name: opponentLineups.name,
@@ -766,7 +741,7 @@ export async function getLineups(): Promise<
         clubId: opponentLineups.clubId,
         clubName: opponentClubs.name,
         createdAt: opponentLineups.createdAt,
-        pairCount: sql<number>`count(${opponentLineupPairs.id})`,
+        pairCount: sql<number>`count(${opponentLineupPairs.id})::integer`,
       })
       .from(opponentLineups)
       .leftJoin(
@@ -777,9 +752,8 @@ export async function getLineups(): Promise<
         opponentClubs,
         eq(opponentLineups.clubId, opponentClubs.id),
       )
-      .groupBy(opponentLineups.id)
-      .orderBy(desc(opponentLineups.createdAt))
-      .all();
+      .groupBy(opponentLineups.id, opponentClubs.id)
+      .orderBy(desc(opponentLineups.createdAt));
     return { success: true, data: rows };
   } catch (e) {
     return { success: false, error: (e as Error).message, data: [] };
@@ -804,19 +778,17 @@ export async function getLineup(id: number): Promise<
   }>
 > {
   try {
-    const lineup = db
+    const lineup = (await db
       .select()
       .from(opponentLineups)
-      .where(eq(opponentLineups.id, id))
-      .get();
+      .where(eq(opponentLineups.id, id)))[0];
     if (!lineup) return { success: false, error: "Lineup not found" };
 
-    const pairs = db
+    const pairs = await db
       .select()
       .from(opponentLineupPairs)
       .where(eq(opponentLineupPairs.lineupId, id))
-      .orderBy(asc(opponentLineupPairs.matchOrder))
-      .all();
+      .orderBy(asc(opponentLineupPairs.matchOrder));
 
     return {
       success: true,
@@ -839,7 +811,7 @@ export async function getLineup(id: number): Promise<
 
 export async function deleteLineup(id: number): Promise<ActionResult> {
   try {
-    db.delete(opponentLineups).where(eq(opponentLineups.id, id)).run();
+    await db.delete(opponentLineups).where(eq(opponentLineups.id, id));
     revalidatePath("/analytics/counter");
     return { success: true };
   } catch (e) {

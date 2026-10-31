@@ -100,6 +100,7 @@ export type Preview = {
   version: string; rows: ProposedRow[]; fixtureSnapshot: string | null;
 };
 export type DraftData = {
+  originalPath?: string; sourcesDeleted?: boolean;
   pageCount: number; extraction?: Extraction; extractionError?: string;
   review?: Review; preview?: Preview; model?: string; extractionVersion: number;
   matchLinks?: { key: string; matchId: number }[];

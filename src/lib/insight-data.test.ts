@@ -6,12 +6,12 @@ import { RequestCookiesAdapter } from "next/dist/server/web/spec-extension/adapt
 import { mkdir, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { createTestDatabase } from "../db/test-database";
+import type { Pool } from "pg";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { PathnameContext, SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
-import { migrateDatabase } from "../db/migration-helper";
 import { Nav } from "../components/nav";
 
 function renderPage(page: ReactNode, pathname = "/", searchParams = new URLSearchParams()) {
@@ -22,7 +22,7 @@ function renderPage(page: ReactNode, pathname = "/", searchParams = new URLSearc
     createElement(SearchParamsContext.Provider, { value: searchParams }, page))));
 }
 
-test("analytics uses tiles on overview and one scoped navigation row inside a section", () => {
+test("analytics uses tiles on overview and one scoped navigation row inside a section", async () => {
   const overview = renderPage(createElement(Nav), "/analytics");
   assert.doesNotMatch(overview, /aria-label="Analytics sections"|href="\/analytics\/pairings/);
   for (const route of ["/analytics/pairings", "/analytics/suggest", "/analytics/counter"]) {
@@ -53,15 +53,14 @@ test("live insight loading includes empty fixtures and inactive roster members, 
   const filename = path.join(directory, "test.db");
   const previousPath = process.env.CONVENER_DB_PATH;
   process.env.CONVENER_DB_PATH = filename;
-  const sqlite = new Database(filename);
-  let applicationDb: Database.Database | undefined;
+  const sqlite = await createTestDatabase();
+  let applicationDb: Pool | undefined;
   try {
-    migrateDatabase(sqlite);
-    sqlite.exec(`
+    (await sqlite.exec(`
       INSERT INTO opponent_clubs (id,name) VALUES (1,'Test Away Club'),(15,'Kenya Air Force Golf Club');
       INSERT INTO players (id,name,active,created_at) VALUES
-        (1,'Test One',1,'2026-01-01'),(2,'Test Two',1,'2026-01-01'),
-        (3,'Test Three',1,'2026-01-01'),(4,'Test Four',0,'2026-01-01');
+        (1,'Test One',true,'2026-01-01'),(2,'Test Two',true,'2026-01-01'),
+        (3,'Test Three',true,'2026-01-01'),(4,'Test Four',false,'2026-01-01');
       INSERT INTO fixtures (id,date,opponent_club_id,home_away,created_at) VALUES
         (1,'2026-01-01',1,'away','2026-01-01'),
         (2,'2026-01-02',1,'home','2026-01-01'),
@@ -70,7 +69,7 @@ test("live insight loading includes empty fixtures and inactive roster members, 
         (1,1,2,'Other One','Other Two','win'),
         (1,3,4,'Other Three','Other Four','halved'),
         (3,1,2,'Test Three','Test Four','pending');
-    `);
+    `));
     const { loadInsightData } = await import("./insight-data");
     applicationDb = (await import("../db")).db.$client;
     const initial = await loadInsightData();
@@ -139,10 +138,10 @@ test("live insight loading includes empty fixtures and inactive roster members, 
     assert.match(empty, /href="\/fixtures\/1"/);
     assert.match(empty, /Roster participation/);
 
-    sqlite.prepare(`INSERT INTO matches
+    (await sqlite.prepare(`INSERT INTO matches
       (fixture_id,player1_id,player2_id,opponent1_name,opponent2_name,result)
-      VALUES (2,1,2,'Other One','Other Two','loss')`).run();
-    sqlite.prepare("UPDATE matches SET result='win' WHERE fixture_id=3").run();
+      VALUES (2,1,2,'Other One','Other Two','loss')`).run());
+    (await sqlite.prepare("UPDATE matches SET result='win' WHERE fixture_id=3").run());
     const refreshed = await loadInsightData();
     assert.equal(refreshed.matches.length, 4);
     assert.equal(refreshed.matches.find((match) => match.fixtureId === 3)?.result, "win");
@@ -170,23 +169,23 @@ test("live insight loading includes empty fixtures and inactive roster members, 
     }
     selectedScope = "ndc";
 
-    sqlite.prepare(`INSERT INTO fixtures (id,date,opponent_club_id,home_away,created_at)
-      VALUES (4,'9999-12-01',1,'away','2026-01-01')`).run();
+    (await sqlite.prepare(`INSERT INTO fixtures (id,date,opponent_club_id,home_away,created_at)
+      VALUES (4,'9999-12-01',1,'away','2026-01-01')`).run());
     const upcoming = renderPage(await DashboardPage());
     assert.match(upcoming, /9999-12-01/);
     assert.match(upcoming, /href="\/fixtures\/4"/);
     assert.doesNotMatch(upcoming, /No upcoming fixture is recorded/);
 
-    sqlite.prepare("UPDATE fixtures SET home_away='unrecognized' WHERE id=4").run();
+    (await sqlite.prepare("UPDATE fixtures SET home_away='unrecognized' WHERE id=4").run());
     await assert.rejects(() => loadInsightData(), /invalid home\/away location/);
-    sqlite.prepare("UPDATE fixtures SET home_away='away' WHERE id=4").run();
-    sqlite.exec("ALTER TABLE matches RENAME TO unavailable_matches");
+    (await sqlite.prepare("UPDATE fixtures SET home_away='away' WHERE id=4").run());
+    (await sqlite.exec("ALTER TABLE matches RENAME TO unavailable_matches"));
     await assert.rejects(() => loadInsightData(), /match|load|database|table/i);
     await assert.rejects(() => DashboardPage(), /Unable to load insight matches/);
   } finally {
     cookieMock.mock.restore();
-    applicationDb?.close();
-    sqlite.close();
+    await applicationDb?.end();
+    (await sqlite.close());
     if (previousPath === undefined) delete process.env.CONVENER_DB_PATH;
     else process.env.CONVENER_DB_PATH = previousPath;
     await rm(directory, { recursive: true, force: true });
