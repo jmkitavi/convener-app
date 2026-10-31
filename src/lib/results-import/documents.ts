@@ -91,7 +91,7 @@ async function renderPdf(buffer: Buffer): Promise<Buffer[]> {
       buffer,
       canvasModule: pathToFileURL(resolveModule.resolve("@napi-rs/canvas")).href,
       pdfModule: pathToFileURL(resolveModule.resolve("pdfjs-dist/legacy/build/pdf.mjs")).href,
-      standardFonts: `${join(dirname(resolveModule.resolve("pdfjs-dist/package.json")), "standard_fonts")}/`,
+      standardFonts: `${join(dirname(resolveModule.resolve("pdfjs-dist/legacy/build/pdf.mjs")), "..", "..", "standard_fonts")}/`,
     },
     resourceLimits: { maxOldGenerationSizeMb: 256 },
   });
